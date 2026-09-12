@@ -100,6 +100,8 @@ fun MainScreen(
     var showAddSheet by remember { mutableStateOf(false) }
     var showInviteDialog by remember { mutableStateOf(false) }
     var showJoinDialog by remember { mutableStateOf(false) }
+    var joinDialogCreating by remember { mutableStateOf(false) }
+    var joinError by remember { mutableStateOf<String?>(null) }
     var generatedCode by remember { mutableStateOf<String?>(null) }
     var updateInfo by remember { mutableStateOf<AppUpdateManager.UpdateInfo?>(null) }
 
@@ -147,8 +149,16 @@ fun MainScreen(
                         color = Color(currentTheme.textColor)
                     )
 
-                    IconButton(onClick = { showJoinDialog = true }) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = "초대/연결", tint = Color(currentTheme.accentHex))
+                    IconButton(onClick = {
+                        // 현재 방의 초대 코드 조회 후 아내/가족 초대 다이얼로그 표시
+                        scope.launch {
+                            spaceRepo.getOrRefreshInviteCode(currentSpace.id).onSuccess { code ->
+                                generatedCode = code
+                                showInviteDialog = true
+                            }
+                        }
+                    }) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = "가족 초대하기", tint = Color(currentTheme.accentHex))
                     }
                 }
             } else {
@@ -182,7 +192,7 @@ fun MainScreen(
                     }
 
                     item {
-                        IconButton(onClick = { showJoinDialog = true }) {
+                        IconButton(onClick = { showJoinDialog = true; joinDialogCreating = true }) {
                             Icon(Icons.Default.Add, contentDescription = "새 방 추가", tint = Color(currentTheme.accentHex))
                         }
                     }
@@ -204,7 +214,10 @@ fun MainScreen(
                             }
                         }
                     },
-                    onJoinClick = { showJoinDialog = true }
+                    onJoinClick = {
+                        joinDialogCreating = false
+                        showJoinDialog = true
+                    }
                 )
                 return@Column
             }
@@ -356,7 +369,7 @@ fun MainScreen(
             title = { Text("우리 집 초대 코드", fontWeight = FontWeight.Bold) },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("상대방 폰에 아래 6자리 코드를 입력해 주세요:")
+                    Text("아내(가족) 폰의 토닥토닥 앱에서\n아래 6자리 코드를 입력해 주세요:", fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = generatedCode ?: "",
@@ -365,7 +378,17 @@ fun MainScreen(
                         color = Color(currentTheme.accentHex)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("(연결 완료 시 코드는 자동으로 소멸됩니다)", fontSize = 12.sp, color = Color.Gray)
+                    Text(
+                        "(코드는 10분간 유효하며, 연결 완료 시 자동으로 소멸됩니다)",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "다시 보려면 상단의 👤 초대 아이콘을 눌러 주세요.",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
                 }
             },
             confirmButton = {
@@ -419,6 +442,7 @@ fun MainScreen(
     if (showJoinDialog) {
         JoinSpaceDialog(
             theme = currentTheme,
+            initialCreating = joinDialogCreating,
             onDismiss = { showJoinDialog = false },
             onJoinCode = { code ->
                 scope.launch {
@@ -556,13 +580,14 @@ private fun EmptySpaceGuide(
 @Composable
 private fun JoinSpaceDialog(
     theme: ThemeColor,
+    initialCreating: Boolean = false,
     onDismiss: () -> Unit,
     onJoinCode: (code: String) -> Unit,
     onCreateNew: (title: String, theme: ThemeColor) -> Unit
 ) {
     var inputCode by remember { mutableStateOf("") }
     var newTitle by remember { mutableStateOf("") }
-    var isCreating by remember { mutableStateOf(false) }
+    var isCreating by remember { mutableStateOf(initialCreating) }
 
     // 연결하기 버튼은 유효한 6자리 코드가 모두 입력되었을 때만 활성화
     val isCodeValid = InviteCodeGenerator.isValidCode(inputCode)

@@ -140,6 +140,49 @@ def create_space():
             db.close()
 
 
+@app.route("/api/spaces/<space_id>/invite", methods=["GET"])
+def get_space_invite(space_id):
+    """스페이스의 유효한 초대 코드 조회 (없거나 만료 시 새로 발급)"""
+    db = get_db()
+    try:
+        now_ms = int(time.time() * 1000)
+
+        # 스페이스 존재 여부 확인
+        s_res = db.execute("SELECT id FROM spaces WHERE id = ?", (space_id,))
+        s_rows = s_res.fetchall() if hasattr(s_res, "fetchall") else s_res.rows
+        if not s_rows:
+            return jsonify({"error": "존재하지 않는 스페이스입니다."}), 404
+
+        # 아직 유효한 초대 코드가 있으면 재사용 (10분 내 반복 조회 지원)
+        i_res = db.execute(
+            "SELECT code, expires_at FROM invites WHERE space_id = ? AND expires_at > ?",
+            (space_id, now_ms)
+        )
+        i_rows = i_res.fetchall() if hasattr(i_res, "fetchall") else i_res.rows
+        if i_rows:
+            raw = i_rows[0]["code"] if isinstance(i_rows[0], dict) or hasattr(i_rows[0], "keys") else i_rows[0][0]
+            expires_at = i_rows[0]["expires_at"] if isinstance(i_rows[0], dict) or hasattr(i_rows[0], "keys") else i_rows[0][1]
+            formatted = f"{raw[:3]}-{raw[3:]}" if "-" not in raw else raw
+            remaining = max(1, int((expires_at - now_ms) / 60000))
+            return jsonify({"invite_code": formatted, "expires_in_minutes": remaining}), 200
+
+        # 유효 코드가 없으면 새로 발급 (기존 만료 코드 정리 후)
+        db.execute("DELETE FROM invites WHERE space_id = ?", (space_id,))
+        code = generate_invite_code()
+        expires_at = now_ms + (10 * 60 * 1000)
+        db.execute(
+            "INSERT INTO invites (code, space_id, created_by, expires_at) VALUES (?, ?, ?, ?)",
+            (code.replace("-", ""), space_id, None, expires_at)
+        )
+        if hasattr(db, "commit"):
+            db.commit()
+
+        return jsonify({"invite_code": code, "expires_in_minutes": 10}), 200
+    finally:
+        if hasattr(db, "close"):
+            db.close()
+
+
 @app.route("/api/spaces/join", methods=["POST"])
 def join_space():
     """6자리 초대 코드로 참여 (참여 즉시 코드 영구 소멸)"""

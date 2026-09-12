@@ -166,6 +166,34 @@ class SpaceRepository {
     }
 
     /**
+     * 스페이스의 유효한 초대 코드 조회 (서버에 없거나 만료 시 자동 재발급)
+     * 서버 연결 실패 시 새 로컬 코드로 폴백 (createSpace와 동일한 로컬 우선 정책)
+     */
+    suspend fun getOrRefreshInviteCode(spaceId: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/invite")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val resBody = response.body?.string() ?: ""
+
+            if (response.isSuccessful) {
+                val code = JSONObject(resBody).optString("invite_code", "")
+                if (code.isNotBlank()) {
+                    return@withContext Result.success(code)
+                }
+            }
+        } catch (_: Exception) {
+            // 서버 연결 실패 시 아래 로컬 폴백 사용
+        }
+
+        // 로컬 폴백: 새 코드 생성 (서버에 등록되지 않아 상대 연결은 서버 복구 후 필요)
+        Result.success(InviteCodeGenerator.generateFormattedCode())
+    }
+
+    /**
      * 내가 참여 중인 모든 1:1 스페이스 목록 실시간 구독
      */
     fun observeMySpaces(): Flow<List<Space>> {
