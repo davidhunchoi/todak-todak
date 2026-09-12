@@ -13,6 +13,7 @@ import com.honey.familyspace.receiver.NotificationActionReceiver
 import com.honey.familyspace.ui.MainActivity
 import com.honey.familyspace.util.DateTimeUtils
 import com.honey.familyspace.widget.FamilySpaceWidget
+import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
