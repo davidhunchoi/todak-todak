@@ -330,7 +330,39 @@ def health_check():
         "status": "online",
         "service": "토닥토닥 (TodakTodak) API",
         "time": datetime.now(KST).isoformat()
-    }), 200
+        }), 200
+
+
+@app.route("/debug/schema", methods=["GET"])
+def debug_schema():
+    """디버깅용: Turso DB의 테이블 스키마 확인 (임시 엔드포인트)"""
+    db = get_db()
+    result = {}
+    try:
+        # Check if tables exist using INFORMATION_SCHEMA (libsql/Turso standard)
+        try:
+            probe = _q(db, "SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [r[0] if not hasattr(r, 'keys') else r['name'] for r in _rows(probe)]
+            result["sqlite_master_tables"] = tables
+        except Exception as e:
+            result["sqlite_master_error"] = str(e)
+        
+        # Try CREATE TABLE test
+        try:
+            _q(db, "CREATE TABLE IF NOT EXISTS test_table (id TEXT)")
+            result["create_test"] = "success"
+        except Exception as e:
+            result["create_test_error"] = str(e)
+        
+        # Try INSERT
+        try:
+            _q(db, "INSERT INTO test_table (id) VALUES (?)", ["test-id-1"])
+            result["insert_test"] = "success"
+        except Exception as e:
+            result["insert_test_error"] = str(e)
+    finally:
+        _db_close(db)
+    return jsonify(result), 200
 
 
 # ==========================================
