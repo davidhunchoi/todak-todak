@@ -11,6 +11,8 @@ object DateTimeUtils {
 
     private val DATE_FORMAT = SimpleDateFormat("yyyy-MM-dd", Locale.KOREA)
     private val TIME_KOREAN_FORMAT = SimpleDateFormat("a hh:mm", Locale.KOREA)
+    private val DAY_OF_WEEK_FORMAT = SimpleDateFormat("E", Locale.KOREA)
+    private val MONTH_DAY_FORMAT = SimpleDateFormat("M월 d일", Locale.KOREA)
 
     /**
      * 오늘 날짜 문자열 반환 ("YYYY-MM-DD")
@@ -40,5 +42,20 @@ object DateTimeUtils {
      */
     fun formatDateString(timestamp: Long): String {
         return DATE_FORMAT.format(Date(timestamp))
+    }
+
+    /**
+     * "YYYY-MM-DD" 를 사람이 읽기 쉬운 한국어 날짜로 변환 (예: "2026-09-15 (화)")
+     * 파싱 실패 시 원본 문자열 반환
+     */
+    fun formatKoreanDate(dateString: String): String {
+        return try {
+            val parsed = DATE_FORMAT.parse(dateString) ?: return dateString
+            val dayOfWeek = DAY_OF_WEEK_FORMAT.format(parsed)
+            val monthDay = MONTH_DAY_FORMAT.format(parsed)
+            "$monthDay ($dayOfWeek)"
+        } catch (e: Exception) {
+            dateString
+        }
     }
 }

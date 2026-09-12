@@ -1,0 +1,74 @@
+name: Build & Release APK
+
+# APK 배포 자동화 워크플로우
+# - 태그 푸시(v1.2.0 등) 또는 수동 실행(workflow_dispatch) 시
+#   Android 앱을 빌드해 GitHub Release에 app-debug.apk로 첨부
+# - 배포 링크: https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '릴리스 태그 (예: v1.2.0) — 비우면 현재 브랜치로 릴리스'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK (Build Tools 34.0.0)
+        uses: android-actions/setup-android@v3
+        with:
+          android-version: '34.0.0'
+          accept-license: 'true'
+
+      - name: Enable Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ hashFiles('**/*.gradle.kts', 'gradle.lockfile') }}
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Verify artifact
+        run: |
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Compute release tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "release_tag=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create / Update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.release_tag }}
+          APK: app/build/outputs/apk/debug/app-debug.apk
+        run: |
+          gh release create "$TAG" "$APK" \
+            --title "$TAG" \
+            --notes "토닥토닥 자동 빌드 릴리스" \
+            --generate-notes \
+            --latest || \
+            gh release upload "$TAG" "$APK" --clobber

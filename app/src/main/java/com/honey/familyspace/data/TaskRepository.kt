@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 /**
  * 할 일(`Task`) 및 매일 루틴(`DailyRoutine`) 실시간 저장소 (Render API + 로컬 우선)
  */
-class TaskRepository {
+class TaskRepository(private val dataStore: DataStoreManager? = null) {
 
     companion object {
         private const val BASE_URL = "https://todak-todak.onrender.com"
@@ -32,6 +32,14 @@ class TaskRepository {
 
         private val tasksMap = mutableMapOf<String, MutableStateFlow<List<Task>>>()
         private val routinesMap = mutableMapOf<String, MutableStateFlow<List<DailyRoutine>>>()
+    }
+
+    /**
+     * 기기 고유 사용자 ID 반환 (DataStore 기반 영구 ID, 주입 안 되면 임시 ID)
+     * 매일 루틴의 "나" vs "상대" 완료 구분에 사용
+     */
+    private suspend fun myUserId(): String {
+        return dataStore?.getOrCreateUserId() ?: "local-user"
     }
 
     private fun getTaskFlow(spaceId: String): MutableStateFlow<List<Task>> {
@@ -103,7 +111,7 @@ class TaskRepository {
             val jsonBody = JSONObject().apply {
                 put("title", title)
                 put("due_date", dueDate)
-                put("user_id", "my-uid")
+                put("user_id", myUserId())
             }
             val request = Request.Builder()
                 .url("$BASE_URL/api/spaces/$spaceId/tasks")
@@ -181,9 +189,11 @@ class TaskRepository {
 
         try {
             val jsonBody = JSONObject().apply {
+                put("id", routineId)
                 put("title", title)
                 put("icon_type", iconType)
                 put("target_time", targetTime)
+                put("user_id", myUserId())
             }
             val request = Request.Builder()
                 .url("$BASE_URL/api/spaces/$spaceId/routines")
@@ -198,6 +208,7 @@ class TaskRepository {
     suspend fun checkRoutineDone(spaceId: String, routineId: String): Result<String> = withContext(Dispatchers.IO) {
         val todayDate = DateTimeUtils.getTodayDateString()
         val completedTimeKorean = DateTimeUtils.getCurrentKoreanTimeString()
+        val myId = myUserId()
 
         val flow = getRoutineFlow(spaceId)
         flow.value = flow.value.map {
@@ -210,14 +221,75 @@ class TaskRepository {
         }
 
         try {
+            val jsonBody = JSONObject().apply {
+                put("user_id", myId)
+            }
             val request = Request.Builder()
                 .url("$BASE_URL/api/spaces/$spaceId/routines/$routineId/check")
-                .post("{}".toRequestBody(JSON))
+                .post(jsonBody.toString().toRequestBody(JSON))
                 .build()
             client.newCall(request).execute()
         } catch (_: Exception) {}
 
         Result.success(completedTimeKorean)
+    }
+
+    /**
+     * 서버에서 루틴 목록 + 사람별 오늘 체크 상태 동기화
+     * (상대방이 체크한 기록을 partnerCompleted* 필드로 반영)
+     */
+    suspend fun syncRoutinesFromServer(spaceId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val myId = myUserId()
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/routines?user_id=$myId")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext Result.failure(
+                IllegalStateException("루틴 동기화 실패 (${response.code})")
+            )
+
+            val resJson = JSONObject(response.body?.string() ?: "")
+            val routinesArray = resJson.optJSONArray("routines") ?: return@withContext Result.failure(
+                IllegalStateException("루틴 응답 형식 오류")
+            )
+
+            val flow = getRoutineFlow(spaceId)
+            val localList = flow.value
+
+            // 서버 데이터를 기준으로 새 목록 구성 (순서: 서버 순서)
+            val synced = mutableListOf<DailyRoutine>()
+            for (i in 0 until routinesArray.length()) {
+                val r = routinesArray.getJSONObject(i)
+                val id = r.optString("id")
+                // 로컬에만 존재하던 것(오프라인 등록)은 유지하지 않고 서버 기준으로 교체
+                synced.add(
+                    DailyRoutine(
+                        id = id,
+                        spaceId = spaceId,
+                        title = r.optString("title"),
+                        iconType = r.optString("icon_type", "PILL"),
+                        targetTime = r.optString("target_time", "08:30"),
+                        lastCompletedDate = r.optString("my_completed_date", ""),
+                        lastCompletedTime = r.optString("my_completed_time", ""),
+                        partnerCompletedDate = r.optString("partner_completed_date", ""),
+                        partnerCompletedTime = r.optString("partner_completed_time", ""),
+                        createdAt = r.optLong("created_at", System.currentTimeMillis())
+                    )
+                )
+            }
+
+            // 로컬에만 있고 서버에 없는 루틴(전송 실패분)은 앞에 보존
+            val serverIds = synced.map { it.id }.toSet()
+            val localsOnly = localList.filter { it.id !in serverIds }
+            flow.value = localsOnly + synced
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun deleteRoutine(spaceId: String, routineId: String): Result<Unit> = withContext(Dispatchers.IO) {

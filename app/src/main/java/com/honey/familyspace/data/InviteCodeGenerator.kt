@@ -3,53 +3,49 @@ package com.honey.familyspace.data
 import java.security.SecureRandom
 
 /**
- * 6자리 일회성 초대 코드 생성기
+ * 4자리 숫자 일회성 초대 코드 생성기 (예: "1234")
  *
- * 혼동하기 쉬운 문자(0과 O, 1과 I)를 배제하여 컴맹이나 어르신도 오타 없이 입력 가능하도록 설계
+ * 숫자만 사용해 어르신도 쉽게 입력할 수 있도록 설계.
+ * 코드는 10분간 유효하며 상대가 연결하는 순간 소멸하는 1회용.
  */
 object InviteCodeGenerator {
 
-    // 헷갈리는 문자(0, O, 1, I)를 제외한 32개 문자셋
-    private const val CHAR_POOL = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
-    private const val CODE_LENGTH = 6
+    private const val CODE_LENGTH = 4
     private val random = SecureRandom()
 
     /**
-     * 6자리 난수 코드 생성 (예: "H79K2P")
+     * 4자리 숫자 코드 생성 (예: "0837")
      */
     fun generateRawCode(): String {
         val sb = StringBuilder(CODE_LENGTH)
         repeat(CODE_LENGTH) {
-            val index = random.nextInt(CHAR_POOL.length)
-            sb.append(CHAR_POOL[index])
+            sb.append(random.nextInt(10))
         }
         return sb.toString()
     }
 
     /**
-     * 읽기 편한 하이픈 포맷 코드 반환 (예: "H79-K2P")
+     * 표시용 코드 (4자리 숫자, 하이픈 없음)
      */
     fun generateFormattedCode(): String {
-        val raw = generateRawCode()
-        return "${raw.substring(0, 3)}-${raw.substring(3)}"
+        return generateRawCode()
     }
 
     /**
-     * 사용자가 입력한 코드 정규화 (하이픈 및 공백 제거, 대문자 변환)
+     * 사용자가 입력한 코드 정규화 (하이픈 및 공백 제거)
      */
     fun normalizeCode(input: String): String {
         return input.replace("-", "")
             .replace(" ", "")
             .trim()
-            .uppercase()
     }
 
     /**
-     * 유효한 6자리 코드 포맷인지 검증
+     * 유효한 4자리 숫자 코드 포맷인지 검증
      */
     fun isValidCode(input: String): Boolean {
         val normalized = normalizeCode(input)
         if (normalized.length != CODE_LENGTH) return false
-        return normalized.all { it in CHAR_POOL }
+        return normalized.all { it.isDigit() }
     }
 }

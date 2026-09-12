@@ -31,9 +31,9 @@ class MainActivity : ComponentActivity() {
         // 필수 권한 요청 (음성 인식 및 알림)
         checkAndRequestPermissions()
 
-        val spaceRepo = SpaceRepository()
-        val taskRepo = TaskRepository()
         val dataStore = DataStoreManager(applicationContext)
+        val spaceRepo = SpaceRepository(dataStore)
+        val taskRepo = TaskRepository(dataStore)
 
         // 상단바 고정 알림 초기화
         OngoingNotificationManager.updateOngoingNotification(this)

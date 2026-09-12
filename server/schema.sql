@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS space_members (
     FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 );
 
--- 3. 일회성 6자리 초대 코드 테이블 (참여 즉시 자동 삭제)
+-- 3. 일회성 4자리 숫자 초대 코드 테이블 (참여 즉시 자동 삭제)
 CREATE TABLE IF NOT EXISTS invites (
     code TEXT PRIMARY KEY,
     space_id TEXT NOT NULL,
@@ -51,6 +51,25 @@ CREATE TABLE IF NOT EXISTS routines (
     last_completed_time TEXT DEFAULT '',
     created_at INTEGER NOT NULL,
     FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+);
+
+-- 6. 루틴 완료 체크 (사람별 기록: 남편/아내 각각 체크)
+CREATE TABLE IF NOT EXISTS routine_checks (
+    routine_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    completed_date TEXT NOT NULL,
+    completed_time TEXT NOT NULL,
+    checked_at INTEGER NOT NULL,
+    PRIMARY KEY (routine_id, user_id),
+    FOREIGN KEY (routine_id) REFERENCES routines(id) ON DELETE CASCADE
+);
+
+-- 7. 방 삭제 동의 요청 (모든 멤버 동의 시 방 삭제)
+CREATE TABLE IF NOT EXISTS space_delete_requests (
+    space_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    requested_at INTEGER NOT NULL,
+    PRIMARY KEY (space_id, user_id)
 );
 
 -- 인덱스 생성

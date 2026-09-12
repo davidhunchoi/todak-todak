@@ -53,8 +53,8 @@ class FamilySpaceWidget : GlanceAppWidget() {
         val dataStore = DataStoreManager(context)
         val activeSpaceId = dataStore.activeSpaceIdFlow.firstOrNull() ?: ""
 
-        val taskRepo = TaskRepository()
-        val spaceRepo = SpaceRepository()
+        val taskRepo = TaskRepository(dataStore)
+        val spaceRepo = SpaceRepository(dataStore)
         val todayString = DateTimeUtils.getTodayDateString()
 
         val mySpaces = spaceRepo.observeMySpaces().firstOrNull() ?: emptyList()

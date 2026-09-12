@@ -17,9 +17,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +30,8 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,19 +50,29 @@ import com.honey.familyspace.util.DateTimeUtils
 
 /**
  * 컴맹 아내 맞춤형 초간단 할 일 추가 바텀시트
+ *
+ * @param onAddTask 등록 콜백: (제목, 마감일 "YYYY-MM-DD", 매일 반복 여부)
+ *                   매일 반복 선택 시 dueDate는 무시되고 매일 루틴으로 등록됨
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddTaskBottomSheet(
     theme: ThemeColor,
     onDismiss: () -> Unit,
-    onAddTask: (title: String, dueDate: String) -> Unit
+    onAddTask: (title: String, dueDate: String, isDaily: Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var taskTitle by remember { mutableStateOf("") }
     var selectedDueDate by remember { mutableStateOf(DateTimeUtils.getTodayDateString()) }
+    var isDaily by remember { mutableStateOf(false) }
     var isListening by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    // 오늘/내일/기한없음 외의 날짜가 캘린더로 선택되었는지 여부
+    val isCustomDateSelected = selectedDueDate.isNotBlank() &&
+        selectedDueDate != DateTimeUtils.getTodayDateString() &&
+        selectedDueDate != DateTimeUtils.getTomorrowDateString()
 
     val initialLang = remember {
         if (java.util.Locale.getDefault().language == "en") "en-US" else "ko-KR"
@@ -231,39 +246,140 @@ fun AddTaskBottomSheet(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 3. 1-Tap 마감일 선택
-            Text("마감 날짜 선택:", fontSize = 13.sp, color = Color.Gray)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                dateOptions.forEach { (label, dateVal) ->
-                    val isSelected = selectedDueDate == dateVal
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                color = if (isSelected) Color(theme.accentHex) else Color(0xFFF5F5F5),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable { selectedDueDate = dateVal }
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                    ) {
+            // 2-1. 매일 반복 토글 (약 먹기 같은 매일 하는 일)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = if (isDaily) Color(theme.accentHex).copy(alpha = 0.15f) else Color(0xFFF5F5F5),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .clickable { isDaily = !isDaily }
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Column {
+                    Text(
+                        "🔁 매일 반복되는 일",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDaily) Color(theme.accentHex) else Color(0xFF555555)
+                    )
+                    if (isDaily) {
                         Text(
-                            text = label,
-                            fontSize = 14.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) Color.White else Color(0xFF555555)
+                            "나와 아내(상대) 각각 체크하는 매일 루틴으로 등록돼요",
+                            fontSize = 12.sp,
+                            color = Color.Gray
                         )
                     }
                 }
+                Text(
+                    text = if (isDaily) "ON" else "OFF",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDaily) Color(theme.accentHex) else Color(0xFFAAAAAA)
+                )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // 3. 1-Tap 마감일 선택 (매일 반복이 아닐 때만 표시)
+            if (!isDaily) {
+                Text("마감 날짜 선택:", fontSize = 13.sp, color = Color.Gray)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    dateOptions.forEach { (label, dateVal) ->
+                        val isSelected = selectedDueDate == dateVal
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    color = if (isSelected) Color(theme.accentHex) else Color(0xFFF5F5F5),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { selectedDueDate = dateVal }
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 14.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) Color.White else Color(0xFF555555)
+                            )
+                        }
+                    }
+
+                    // 캘린더 아이콘: 원하는 날짜 직접 선택
+                    IconButton(
+                        onClick = { showDatePicker = true },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(
+                                color = if (isCustomDateSelected) Color(theme.accentHex).copy(alpha = 0.15f) else Color(0xFFF5F5F5),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarToday,
+                            contentDescription = "캘린더로 날짜 선택",
+                            tint = if (isCustomDateSelected) Color(theme.accentHex) else Color(0xFF555555),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
+                // 캘린더로 선택한 날짜가 있으면 표시
+                if (isCustomDateSelected) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "📅 선택한 마감일: ${DateTimeUtils.formatKoreanDate(selectedDueDate)}",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(theme.accentHex)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+            } else {
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // 캘린더 데이트피커
+            if (showDatePicker) {
+                val datePickerState = rememberDatePickerState(
+                    initialSelectedDateMillis = System.currentTimeMillis()
+                )
+                DatePickerDialog(
+                    onDismissRequest = { showDatePicker = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            datePickerState.selectedDateMillis?.let { millis ->
+                                selectedDueDate = DateTimeUtils.formatDateString(millis)
+                            }
+                            showDatePicker = false
+                        }) {
+                            Text("선택", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDatePicker = false }) {
+                            Text("취소", color = Color.Gray)
+                        }
+                    }
+                ) {
+                    DatePicker(state = datePickerState)
+                }
+            }
 
             // 4. 등록하기 대형 버튼
             Button(
                 onClick = {
                     if (taskTitle.isNotBlank()) {
-                        onAddTask(taskTitle, selectedDueDate)
+                        onAddTask(taskTitle, selectedDueDate, isDaily)
                         voiceManager.destroy()
                         onDismiss()
                     }
@@ -275,7 +391,12 @@ fun AddTaskBottomSheet(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(theme.accentHex)),
                 enabled = taskTitle.isNotBlank()
             ) {
-                Text("등록하기", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(
+                    if (isDaily) "🔁 매일 반복으로 등록하기" else "등록하기",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))

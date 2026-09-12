@@ -19,6 +19,20 @@ class DataStoreManager(private val context: Context) {
     companion object {
         private val KEY_ACTIVE_SPACE_ID = stringPreferencesKey("active_space_id")
         private val KEY_USER_NICKNAME = stringPreferencesKey("user_nickname")
+        private val KEY_USER_ID = stringPreferencesKey("user_id")
+    }
+
+    /**
+     * 기기별 영구 고유 사용자 ID 반환 (없으면 생성 후 저장)
+     * 매일 루틴의 "나" vs "상대" 완료 구분 및 서버 동기화의 기반
+     */
+    suspend fun getOrCreateUserId(): String {
+        var userId = ""
+        context.dataStore.edit { prefs ->
+            userId = prefs[KEY_USER_ID] ?: java.util.UUID.randomUUID().toString().substring(0, 8)
+            prefs[KEY_USER_ID] = userId
+        }
+        return userId
     }
 
     /**
