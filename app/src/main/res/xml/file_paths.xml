@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-path name="external_files" path="." />
+    <!-- DownloadManager + getExternalFilesDir(DIRECTORY_DOWNLOADS) 경로와 매칭 (없으면 설치 화면 호출 시 크래시) -->
+    <external-files-path name="external_files_dl" path="Download/" />
+    <external-files-path name="external_files_root" path="." />
     <external-cache-path name="external_cache" path="." />
     <cache-path name="cache" path="." />
 </paths>

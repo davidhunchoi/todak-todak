@@ -12,6 +12,7 @@ import com.honey.familyspace.data.DataStoreManager
 import com.honey.familyspace.data.SpaceRepository
 import com.honey.familyspace.data.TaskRepository
 import com.honey.familyspace.notification.OngoingNotificationManager
+import com.honey.familyspace.util.AppUpdateManager
 
 /**
  * FamilySpace Todo 메인 액티비티
@@ -75,5 +76,10 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // 앱으로 돌아올 때마다 상단바 알림 갱신
         OngoingNotificationManager.updateOngoingNotification(this)
+        // 설치 권한 허용 후 돌아왔으면 대기 중이던 업데이트 다운로드 이어서 시작
+        val pendingUrl = AppUpdateManager.consumePendingApkUrl()
+        if (pendingUrl != null && packageManager.canRequestPackageInstalls()) {
+            AppUpdateManager.startDownloadAndInstall(this, pendingUrl)
+        }
     }
 }

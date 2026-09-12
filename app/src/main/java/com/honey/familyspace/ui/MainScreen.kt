@@ -133,12 +133,12 @@ fun MainScreen(
     var consentTargetSpace by remember { mutableStateOf<Space?>(null) }
 
     // 앱 실행 시 백엔드 서버에 새 버전(업데이트) 있는지 확인 및 내 방 목록 동기화
+    // - 자동 다운로드는 하지 않음: 업데이트 팝업에서 [지금 업데이트]를 눌렀을 때만 다운로드
+    //   (이전처럼 실행 직후 토스트+자동 다운로드는 "삭제하려는데 업그레이드?" 혼란 + 다운로드/설치 충돌 원인이었음)
     LaunchedEffect(Unit) {
         val info = AppUpdateManager.checkForUpdate(context)
         if (info != null && info.hasUpdate) {
-            // 사용자 번거로움 0: 확인 팝업 없이 백그라운드 자동 다운로드 및 시스템 설치창 즉시 호출!
-            Toast.makeText(context, "🌸 최신 버전(v${info.versionName})을 준비합니다. 잠시 후 [설치]를 눌러주세요!", Toast.LENGTH_LONG).show()
-            AppUpdateManager.startDownloadAndInstall(context, info.apkUrl)
+            updateInfo = info
         }
         spaceRepo.syncSpacesFromServer()
 
@@ -737,7 +737,9 @@ fun MainScreen(
         )
     }
 
-    // 인앱 자체 자동 업데이트 알림 다이얼로그 (대안 B)
+    // 인앱 자체 업데이트 알림 다이얼로그
+    // - 앱 실행 시 자동 다운로드하지 않고, 여기서 [지금 업데이트]를 눌렀을 때만 다운로드+설치
+    // - 닫기/나중에는 다시 묻지 않음 (방 삭제 등 다른 작업 중 방해 금지)
     updateInfo?.let { info ->
         AlertDialog(
             onDismissRequest = { updateInfo = null },

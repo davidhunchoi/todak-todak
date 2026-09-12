@@ -335,14 +335,13 @@ def get_space_invite(space_id):
             return jsonify({"error": "존재하지 않는 스페이스입니다."}), 404
 
         # 아직 유효한 초대 코드가 있으면 재사용 (10분 내 반복 조회 지원)
-        i_res = _q(db, 
+        i_rows = _rows(_q(db,
             "SELECT code, expires_at FROM invites WHERE space_id = ? AND expires_at > ?",
             (space_id, now_ms)
-        )
-        i_rows = _rows(i_res)
+        ))
         if i_rows:
-            raw = i_rows[0]["code"] if isinstance(i_rows[0], dict) or hasattr(i_rows[0], "keys") else i_rows[0][0]
-            expires_at = i_rows[0]["expires_at"] if isinstance(i_rows[0], dict) or hasattr(i_rows[0], "keys") else i_rows[0][1]
+            raw = _row_get(i_rows[0], "code", 0)
+            expires_at = _row_get(i_rows[0], "expires_at", 1)
             remaining = max(1, int((expires_at - now_ms) / 60000))
             return jsonify({"invite_code": raw, "expires_in_minutes": remaining}), 200
 
@@ -828,8 +827,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 4
-CURRENT_APP_VERSION_NAME = "1.3.0"
+CURRENT_APP_VERSION_CODE = 5
+CURRENT_APP_VERSION_NAME = "1.3.1"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -837,8 +836,10 @@ def get_app_version():
     return jsonify({
         "version_code": CURRENT_APP_VERSION_CODE,
         "version_name": CURRENT_APP_VERSION_NAME,
-        "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk",
-        "changelog": "🎉 v1.3.0\n- 오늘 챙길 일 카운트에 매일 루틴 통합\n- 루틴 카드 원터치 완료 토글 및 심플 디자인 개편\n- 카드 길게 눌러 내용/날짜 수정 및 즉시 삭제 지원\n- 상단 초대 코드 입력 버튼 상시 제공 및 중립 초대 문구\n- 홈 화면 위젯 실시간 자동 갱신\n- 음성 인식 개선: 녹음 중지 버튼(■) 및 실시간 자막 스트리밍\n- 자주 쓰는 태그 '운동 하기' 추가"
+        # 고정 자산명: 구버전 앱(app-debug.apk 링크 내장) 호환을 위해 폴백 URL도 함께 제공
+        "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
+        "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk",
+        "changelog": "🎉 v1.3.1\n- 방 만들기 500 오류 수정 및 연결 안정성 대폭 개선\n- 오늘 챙길 일 카운트에 매일 루틴 통합\n- 루틴 카드 원터치 완료 토글 및 심플 디자인 개편\n- 카드 길게 눌러 내용/날짜 수정 및 즉시 삭제 지원\n- 상단 초대 코드 입력 버튼 상시 제공 및 중립 초대 문구\n- 홈 화면 위젯 실시간 자동 갱신\n- 음성 인식 개선: 녹음 중지 버튼(■) 및 실시간 자막 스트리밍"
     }), 200
 
 
@@ -849,8 +850,8 @@ def download_latest_apk():
     if os.path.exists(apk_file):
         return send_file(apk_file, as_attachment=True, download_name="todak-todak.apk")
 
-    # 깃허브 최신 릴리스로 안전하게 폴백
-    return redirect("https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk")
+    # 깃허브 최신 릴리스로 안전하게 폴백 (신규 고정 자산명 → 구 자산명 순)
+    return redirect("https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk")
 
 
 if __name__ == "__main__":

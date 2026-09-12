@@ -14,8 +14,8 @@ android {
         applicationId = "com.honey.familyspace"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3.0"
+        versionCode = 5
+        versionName = "1.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -30,6 +30,20 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // 정식 배포 서명: GitHub Secrets(또는 로컬 환경변수/gradle.properties)에 키가 있으면
+            // 항상 같은 키로 서명 → 덮어설치 "설치 안 됨" 방지. 키가 없으면 debug 서명으로 폴백(로컬 테스트용).
+            val ksPath = System.getenv("KEYSTORE_PATH") ?: project.findProperty("KEYSTORE_PATH") as String?
+            val ksPass = System.getenv("KEYSTORE_PASSWORD") ?: project.findProperty("KEYSTORE_PASSWORD") as String?
+            val keyAliasProp = System.getenv("KEY_ALIAS") ?: project.findProperty("KEY_ALIAS") as String?
+            val keyPass = System.getenv("KEY_PASSWORD") ?: project.findProperty("KEY_PASSWORD") as String?
+            if (!ksPath.isNullOrBlank() && file(ksPath).exists()) {
+                signingConfig = signingConfigs.create("release") {
+                    storeFile = file(ksPath)
+                    storePassword = ksPass
+                    keyAlias = keyAliasProp
+                    keyPassword = keyPass
+                }
+            }
         }
     }
     compileOptions {

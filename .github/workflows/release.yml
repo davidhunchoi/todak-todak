@@ -1,9 +1,11 @@
 name: Build & Release APK
 
 # APK 배포 자동화 워크플로우
-# - 태그 푸시(v1.2.0 등) 또는 수동 실행(workflow_dispatch) 시
-#   Android 앱을 빌드해 GitHub Release에 app-debug.apk로 첨부
-# - 배포 링크: https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk
+# - 태그 푸시(v1.3.1 등) 또는 수동 실행(workflow_dispatch) 시
+#   Android 앱을 빌드해 GitHub Release에 app-release.apk로 첨부 (고정 자산명 → 앱 내 업데이트 URL 안정)
+# - 배포 링크: https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk
+# - 서명 고정: GitHub Secrets에 ANDROID_KEYSTORE_BASE64/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD 등록 필수
+#   (매번 바뀌는 debug 키로 빌드하면 기존 설치와 서명 충돌 → "설치 안 됨")
 
 on:
   push:
@@ -47,12 +49,35 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+      - name: Restore release keystore (same key every build)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+            echo "keystore restored"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 secret이 없어 debug 서명으로 빌드됩니다. 기존 설치와 서명 충돌(설치 안 됨)이 날 수 있어 정식 배포 전 Secrets 등록 필수!"
+          fi
+
+      - name: Build Release APK (signed with fixed key)
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -f "$RUNNER_TEMP/release.keystore" ]; then
+            ./gradlew assembleRelease --no-daemon --stacktrace
+            cp app/build/outputs/apk/release/app-release.apk app-release.apk
+          else
+            ./gradlew assembleDebug --no-daemon --stacktrace
+            cp app/build/outputs/apk/debug/app-debug.apk app-release.apk
+          fi
 
       - name: Verify artifact
         run: |
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app-release.apk
 
       - name: Compute release tag
         id: tag
@@ -67,11 +92,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.release_tag }}
-          APK: app/build/outputs/apk/debug/app-debug.apk
+          APK: app-release.apk
         run: |
-          gh release create "$TAG" "$APK" \
+          gh release create "$TAG" "$APK#app-release.apk" \
             --title "$TAG" \
             --notes "토닥토닥 자동 빌드 릴리스" \
             --generate-notes \
             --latest || \
-            gh release upload "$TAG" "$APK" --clobber
+            gh release upload "$TAG" "$APK#app-release.apk" --clobber
