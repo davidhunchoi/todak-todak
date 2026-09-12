@@ -3,6 +3,7 @@ import uuid
 import time
 import secrets
 import sqlite3
+import traceback as _tb
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify, send_file, redirect
@@ -18,7 +19,12 @@ CORS(app)
 @app.errorhandler(500)
 def handle_internal_error(e):
     """예상치 못한 서버 오류를 HTML 대신 JSON 으로 반환 (앱에서 사유를 안내할 수 있게)"""
-    return jsonify({"error": "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."}), 500
+    import traceback as _tb2
+    _traceback = _tb2.format_exc()
+    print(f"[500 ERROR] {e}\n{_traceback}", flush=True)
+    # TODO: 배포 후 디버깅용 - 실제 서비스에서는 error 필드만 반환
+    return jsonify({"error": "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+                    "detail": str(e), "traceback": _traceback}), 500
 
 # 환경 변수 설정 (Turso 연동)
 TURSO_DB_URL = os.getenv("TURSO_DATABASE_URL")
