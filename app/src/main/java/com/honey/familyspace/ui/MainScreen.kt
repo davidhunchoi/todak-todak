@@ -36,6 +36,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import com.honey.familyspace.util.AppUpdateManager
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -98,6 +100,15 @@ fun MainScreen(
     var showInviteDialog by remember { mutableStateOf(false) }
     var showJoinDialog by remember { mutableStateOf(false) }
     var generatedCode by remember { mutableStateOf<String?>(null) }
+    var updateInfo by remember { mutableStateOf<AppUpdateManager.UpdateInfo?>(null) }
+
+    // 앱 실행 시 백엔드 서버에 새 버전(업데이트) 있는지 자동 확인
+    LaunchedEffect(Unit) {
+        val info = AppUpdateManager.checkForUpdate(context)
+        if (info != null && info.hasUpdate) {
+            updateInfo = info
+        }
+    }
 
     Scaffold(
         containerColor = Color(currentTheme.backgroundHex),
@@ -249,7 +260,9 @@ fun MainScreen(
                                 if (!isDone) {
                                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                     scope.launch {
-                                        taskRepo.checkRoutineDone(currentSpace.id, routine.id)
+                                        currentSpace?.let { space ->
+                                            taskRepo.checkRoutineDone(space.id, routine.id)
+                                        }
                                         OngoingNotificationManager.updateOngoingNotification(context)
                                     }
                                 }
@@ -308,7 +321,9 @@ fun MainScreen(
                             onToggle = {
                                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                 scope.launch {
-                                    taskRepo.toggleTask(currentSpace.id, task.id, task.isCompleted)
+                                    currentSpace?.let { space ->
+                                        taskRepo.toggleTask(space.id, task.id, task.isCompleted)
+                                    }
                                     OngoingNotificationManager.updateOngoingNotification(context)
                                 }
                             }
@@ -355,6 +370,45 @@ fun MainScreen(
             confirmButton = {
                 TextButton(onClick = { showInviteDialog = false }) {
                     Text("확인")
+                }
+            }
+        )
+    }
+
+    // 인앱 자체 자동 업데이트 알림 다이얼로그 (대안 B)
+    updateInfo?.let { info ->
+        AlertDialog(
+            onDismissRequest = { updateInfo = null },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = Color.White,
+            title = {
+                Text("🌸 새로운 토닥토닥 업데이트", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2D2422))
+            },
+            text = {
+                Column {
+                    Text("최신 버전: v${info.versionName}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF7A66))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(info.changelog, fontSize = 14.sp, color = Color(0xFF555555))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("지금 바로 1초 만에 업데이트하시겠어요?", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFF2D2422))
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val apkUrl = info.apkUrl
+                        updateInfo = null
+                        AppUpdateManager.startDownloadAndInstall(context, apkUrl)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF7A66)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("지금 업데이트 🚀", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { updateInfo = null }) {
+                    Text("나중에", color = Color.Gray)
                 }
             }
         )

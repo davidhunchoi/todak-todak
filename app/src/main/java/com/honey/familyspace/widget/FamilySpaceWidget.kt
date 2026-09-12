@@ -210,7 +210,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
             Row(
                 modifier = GlanceModifier
                     .fillMaxWidth()
-                    .clickable(actionStartActivity(openAppIntent)),
+                    .clickable(actionStartActivity<MainActivity>()),
                 horizontalAlignment = Alignment.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {

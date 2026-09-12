@@ -12,6 +12,7 @@ venv/
 build/
 app/build/
 *.apk
+!server/static/*.apk
 *.aab
 local.properties
 .idea/

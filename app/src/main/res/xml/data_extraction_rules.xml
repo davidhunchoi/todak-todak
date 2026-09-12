@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- 클라우드 백업에서 제외할 항목이 있으면 여기에 추가 -->
+    </cloud-backup>
+    <device-transfer>
+        <!-- 기기 이전 시 제외할 항목이 있으면 여기에 추가 -->
+    </device-transfer>
+</data-extraction-rules>

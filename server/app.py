@@ -5,7 +5,7 @@ import secrets
 import sqlite3
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file, redirect
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -362,6 +362,34 @@ def check_routine(space_id, routine_id):
     finally:
         if hasattr(db, "close"):
             db.close()
+
+
+# ==========================================
+# 4. 앱 버전 및 자체 자동 업데이트 API
+# ==========================================
+CURRENT_APP_VERSION_CODE = 2
+CURRENT_APP_VERSION_NAME = "1.1.0"
+
+@app.route("/api/version", methods=["GET"])
+def get_app_version():
+    """앱 최신 버전 조회 및 인앱 자동 업데이트 정보 반환"""
+    return jsonify({
+        "version_code": CURRENT_APP_VERSION_CODE,
+        "version_name": CURRENT_APP_VERSION_NAME,
+        "apk_url": "https://todak-todak.onrender.com/download/app-latest.apk",
+        "changelog": "글로벌 다국어(한국어/영어) 음성 인식과 여유로운 발화 대기 시간이 적용되었습니다! 🌸"
+    }), 200
+
+
+@app.route("/download/app-latest.apk", methods=["GET"])
+def download_latest_apk():
+    """최신 APK 다운로드 제공 (서버 static 파일 또는 깃허브 최신 릴리스 리다이렉트)"""
+    apk_file = os.path.join(os.path.dirname(__file__), "static", "app-latest.apk")
+    if os.path.exists(apk_file):
+        return send_file(apk_file, as_attachment=True, download_name="todak-todak.apk")
+
+    # 깃허브 최신 릴리스로 안전하게 폴백
+    return redirect("https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk")
 
 
 if __name__ == "__main__":
