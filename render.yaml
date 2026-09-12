@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: familyspace-todo-api
+    runtime: python
+    buildCommand: pip install -r server/requirements.txt
+    startCommand: gunicorn --chdir server app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false

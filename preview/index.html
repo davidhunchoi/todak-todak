@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>토닥토닥 - 인터랙티브 시뮬레이터</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      --bg-coral: #FFF5F0;
+      --accent-coral: #FF7A66;
+      --text-coral: #2D2422;
+      --card-white: #FFFFFF;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-family);
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background: #18191E;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      color: #FFFFFF;
+    }
+
+    .top-controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .mode-btn {
+      background: #2B2D3A;
+      color: #BBB;
+      border: 1px solid #3F4254;
+      padding: 10px 18px;
+      border-radius: 24px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .mode-btn.active {
+      background: #FF7A66;
+      color: #FFFFFF;
+      border-color: #FF7A66;
+      box-shadow: 0 4px 14px rgba(255, 122, 102, 0.4);
+    }
+
+    /* 스마트폰 목업 프레임 */
+    .phone-wrapper {
+      position: relative;
+      width: 380px;
+      height: 780px;
+      background: #000;
+      border-radius: 48px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7), 0 0 0 10px #2D2E36, 0 0 0 12px #444654;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 펀치홀 카메라 & 스피커 */
+    .punch-hole {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 14px;
+      height: 14px;
+      background: #000;
+      border-radius: 50%;
+      z-index: 100;
+    }
+
+    /* 안드로이드 상태 표시줄 */
+    .status-bar {
+      height: 38px;
+      padding: 0 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 600;
+      z-index: 90;
+      transition: color 0.3s ease;
+    }
+
+    .status-bar.dark-text {
+      color: #222;
+    }
+
+    .status-bar.light-text {
+      color: #FFF;
+    }
+
+    /* 스크린 뷰 공통 */
+    .screen-view {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      overflow-y: auto;
+      position: relative;
+    }
+
+    .screen-view.active {
+      display: flex !important;
+    }
+
+    /* ==========================================
+       VIEW 1: 메인 앱 화면
+       ========================================== */
+    #app-screen {
+      transition: background-color 0.35s ease;
+      padding: 10px 20px 20px 20px;
+    }
+
+    /* 적응형 상단 탭 */
+    .space-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      margin-bottom: 14px;
+      scrollbar-width: none;
+    }
+
+    .space-tabs::-webkit-scrollbar {
+      display: none;
+    }
+
+    .space-tab-btn {
+      padding: 9px 18px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+      background: rgba(255, 255, 255, 0.8);
+      color: #555;
+      white-space: nowrap;
+      transition: all 0.25s ease;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+    }
+
+    .space-tab-btn.active {
+      color: #FFFFFF !important;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      transform: translateY(-1px);
+    }
+
+    /* 약 먹기 안심 루틴 카드 */
+    .routine-card {
+      background: var(--card-white);
+      border-radius: 24px;
+      padding: 18px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.04);
+      margin-bottom: 20px;
+      transition: all 0.3s ease;
+    }
+
+    .routine-card.done {
+      background: #E8F5E9;
+      border: 1.5px solid #A5D6A7;
+    }
+
+    .routine-badge-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .routine-badge {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--accent-coral);
+    }
+
+    .routine-card.done .routine-badge {
+      color: #2E7D32;
+    }
+
+    .routine-done-time {
+      font-size: 13px;
+      font-weight: 800;
+      color: #2E7D32;
+    }
+
+    .routine-title {
+      font-size: 19px;
+      font-weight: 800;
+      color: #222;
+      margin-bottom: 14px;
+    }
+
+    .routine-btn {
+      width: 100%;
+      height: 52px;
+      border-radius: 16px;
+      border: none;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      color: #FFF;
+      background: var(--accent-coral);
+      box-shadow: 0 6px 16px rgba(255, 122, 102, 0.35);
+      transition: all 0.25s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .routine-btn:active {
+      transform: scale(0.97);
+    }
+
+    .routine-card.done .routine-btn {
+      background: #C8E6C9;
+      color: #1B5E20;
+      box-shadow: none;
+      cursor: pointer;
+    }
+
+    /* 오늘 할 일 섹션 */
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: #222;
+    }
+
+    .task-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding-bottom: 70px;
+    }
+
+    .task-item {
+      background: #FFFFFF;
+      border-radius: 18px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .task-item:active {
+      transform: scale(0.98);
+    }
+
+    .task-item.completed {
+      background: #F8F9FA;
+      opacity: 0.7;
+    }
+
+    .checkbox-circle {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 2px solid #DDD;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 14px;
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+    }
+
+    .task-item.completed .checkbox-circle {
+      background: var(--accent-coral);
+      border-color: var(--accent-coral);
+    }
+
+    .checkbox-circle svg {
+      display: none;
+      width: 16px;
+      height: 16px;
+      fill: #FFF;
+    }
+
+    .task-item.completed .checkbox-circle svg {
+      display: block;
+    }
+
+    .task-content {
+      flex: 1;
+    }
+
+    .task-name {
+      font-size: 16px;
+      font-weight: 600;
+      color: #222;
+      margin-bottom: 3px;
+    }
+
+    .task-item.completed .task-name {
+      text-decoration: line-through;
+      color: #888;
+    }
+
+    .task-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 8px;
+      background: #FFEBE6;
+      color: #FF5722;
+    }
+
+    /* 플로팅 추가 버튼 */
+    .fab {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      width: 62px;
+      height: 62px;
+      border-radius: 50%;
+      background: var(--accent-coral);
+      color: #FFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 24px rgba(255, 122, 102, 0.5);
+      cursor: pointer;
+      border: none;
+      font-size: 32px;
+      transition: all 0.25s ease;
+      z-index: 50;
+    }
+
+    .fab:hover {
+      transform: scale(1.06);
+    }
+
+    /* ==========================================
+       VIEW 2: 홈 화면 대형 위젯
+       ========================================== */
+    #widget-screen {
+      background: linear-gradient(145deg, #1D2671 0%, #5C258D 50%, #4389A2 100%);
+      padding: 20px 16px;
+    }
+
+    .widget-container {
+      background: var(--bg-coral);
+      border-radius: 28px;
+      padding: 18px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      margin-top: 10px;
+      transition: background-color 0.3s ease;
+    }
+
+    .widget-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .widget-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--text-coral);
+    }
+
+    .widget-summary {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent-coral);
+    }
+
+    .widget-routine-box {
+      background: var(--accent-coral);
+      color: #FFF;
+      border-radius: 16px;
+      padding: 12px 14px;
+      font-size: 13px;
+      font-weight: 800;
+      text-align: center;
+      cursor: pointer;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 12px rgba(255, 122, 102, 0.3);
+      transition: all 0.25s ease;
+    }
+
+    .widget-routine-box.done {
+      background: #E8F5E9;
+      color: #2E7D32;
+      box-shadow: none;
+    }
+
+    .widget-task-item {
+      background: #FFF;
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+
+    .widget-task-check {
+      font-size: 18px;
+      margin-right: 8px;
+      color: var(--accent-coral);
+    }
+
+    .widget-task-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+      flex: 1;
+    }
+
+    .app-icon-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-top: 30px;
+      padding: 0 10px;
+    }
+
+    .app-icon {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .app-icon-img {
+      width: 54px;
+      height: 54px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    }
+
+    .app-icon-name {
+      font-size: 11px;
+      color: #FFF;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+
+    /* ==========================================
+       VIEW 3: 상단바 알림창 (Ongoing Noti)
+       ========================================== */
+    #noti-screen {
+      background: rgba(15, 16, 22, 0.96);
+      backdrop-filter: blur(16px);
+      padding: 16px;
+    }
+
+    .noti-quick-settings {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 16px;
+      margin-bottom: 16px;
+    }
+
+    .quick-circle {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: #2D303E;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .noti-card {
+      background: #252836;
+      border-radius: 20px;
+      padding: 16px;
+      margin-bottom: 12px;
+      border: 1px solid #33384C;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+    }
+
+    .noti-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #AAA;
+      margin-bottom: 8px;
+    }
+
+    .noti-app-title {
+      font-weight: 700;
+      color: #FFF;
+    }
+
+    .noti-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: #FFF;
+      margin-bottom: 4px;
+    }
+
+    .noti-body {
+      font-size: 14px;
+      color: #DDD;
+      line-height: 1.4;
+      margin-bottom: 14px;
+    }
+
+    .noti-action-btn {
+      background: #3B4158;
+      color: #80D8FF;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.2s ease;
+    }
+
+    .noti-action-btn:active {
+      background: #4A526E;
+    }
+
+    /* 바텀시트 모달 (할 일 추가) */
+    .modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      z-index: 150;
+      display: none;
+      align-items: flex-end;
+    }
+
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .bottom-sheet {
+      width: 100%;
+      background: #FFFFFF;
+      border-radius: 28px 28px 0 0;
+      padding: 24px 20px;
+      color: #222;
+      animation: slideUp 0.25s ease-out;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .task-input {
+      flex: 1;
+      height: 50px;
+      border-radius: 16px;
+      border: 1.5px solid #DDD;
+      padding: 0 16px;
+      font-size: 15px;
+      outline: none;
+    }
+
+    .task-input:focus {
+      border-color: var(--accent-coral);
+    }
+
+    .mic-btn {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: var(--accent-coral);
+      color: #FFF;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.2s ease;
+    }
+
+    .mic-btn.listening {
+      background: #FF1744;
+      animation: pulse 1s infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { transform: scale(1); }
+      to { transform: scale(1.1); }
+    }
+
+    .chip-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .chip {
+      background: #F1F3F5;
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      color: #333;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .chip:hover {
+      background: #E9ECEF;
+    }
+
+    .submit-btn {
+      width: 100%;
+      height: 54px;
+      background: var(--accent-coral);
+      color: #FFF;
+      border-radius: 16px;
+      border: none;
+      font-size: 17px;
+      font-weight: 800;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+
+    /* 토스트 메시지 */
+    .toast {
+      position: absolute;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: #FFF;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      z-index: 200;
+      display: none;
+      animation: fadeInOut 2s ease;
+    }
+
+    @keyframes fadeInOut {
+      0% { opacity: 0; transform: translate(-50%, -10px); }
+      15% { opacity: 1; transform: translate(-50%, 0); }
+      85% { opacity: 1; transform: translate(-50%, 0); }
+      100% { opacity: 0; transform: translate(-50%, -10px); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 모드 선택 버튼 -->
+  <div class="top-controls">
+    <button class="mode-btn active" onclick="switchView('app')">📱 앱 메인 화면</button>
+    <button class="mode-btn" onclick="switchView('widget')">🖼️ 홈 화면 대형 위젯</button>
+    <button class="mode-btn" onclick="switchView('noti')">🔔 상단바 고정 알림</button>
+  </div>
+
+  <!-- 스마트폰 프레임 -->
+  <div class="phone-wrapper">
+    <div class="punch-hole"></div>
+
+    <!-- 상태 표시줄 -->
+    <div class="status-bar dark-text" id="status-bar">
+      <span id="clock-time">08:25</span>
+      <span style="display: flex; gap: 6px; align-items: center;">
+        <span>5G</span>
+        <span>📶</span>
+        <span>🔋 95%</span>
+      </span>
+    </div>
+
+    <!-- VIEW 1: 메인 앱 화면 -->
+    <div class="screen-view active" id="app-screen">
+      <!-- 스페이스 알약 탭 (시각적 혼선 방지 1-Tap 테마 컬러) -->
+      <div class="space-tabs">
+        <button class="space-tab-btn active" id="tab-wife" onclick="selectSpace('wife')">🏠 아내와 나 (코랄)</button>
+        <button class="space-tab-btn" id="tab-mom" onclick="selectSpace('mom')">👵 엄마와 나 (그린)</button>
+        <button class="space-tab-btn" id="tab-friend" onclick="selectSpace('friend')">👭 친구 영희 (블루)</button>
+      </div>
+
+      <!-- 매일 약 먹기 안심 루틴 카드 -->
+      <div class="routine-card" id="routine-card">
+        <div class="routine-badge-row">
+          <span class="routine-badge">💊 매일 안심 루틴</span>
+          <span class="routine-done-time" id="routine-done-time" style="display: none;">오전 08:25 완료</span>
+        </div>
+        <div class="routine-title" id="routine-title">아침 혈압약 / 영양제 먹기</div>
+        <button class="routine-btn" id="routine-btn" onclick="toggleRoutine()">
+          <span id="routine-btn-text">먹었어요! 터치해서 체크 💊</span>
+        </button>
+      </div>
+
+      <!-- 오늘 할 일 섹션 -->
+      <div class="section-header">
+        <span class="section-title" id="section-title">오늘 챙길 일 2개 남음</span>
+      </div>
+
+      <!-- 할 일 리스트 -->
+      <div class="task-list" id="task-list">
+        <!-- JS 동적 렌더링 -->
+      </div>
+
+      <!-- 플로팅 추가 버튼 -->
+      <button class="fab" onclick="openBottomSheet()">+</button>
+    </div>
+
+    <!-- VIEW 2: 홈 화면 대형 위젯 -->
+    <div class="screen-view" id="widget-screen">
+      <div class="widget-container" id="widget-container">
+        <div class="widget-header">
+          <span class="widget-title" id="widget-title">🏠 아내와 나</span>
+          <span class="widget-summary" id="widget-summary">2개 남음</span>
+        </div>
+
+        <div class="widget-routine-box" id="widget-routine" onclick="toggleRoutine()">
+          💊 아침 약: 먹었어요! (탭하여 완료)
+        </div>
+
+        <div id="widget-tasks">
+          <!-- 위젯 할 일 2개 노출 -->
+        </div>
+
+        <div style="text-align: right; margin-top: 8px;">
+          <span style="font-size: 11px; color: #888; cursor: pointer;" onclick="switchView('app')">+ 앱 열기 / 할 일 추가</span>
+        </div>
+      </div>
+
+      <div class="app-icon-grid">
+        <div class="app-icon" onclick="switchView('app')">
+          <div class="app-icon-img" style="background: none; overflow: hidden;">
+            <img src="logo.jpg" style="width: 100%; height: 100%; border-radius: 16px; object-fit: cover; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+          </div>
+          <span class="app-icon-name" style="font-weight: 700;">토닥토닥</span>
+        </div>
+        <div class="app-icon">
+          <div class="app-icon-img">💬</div>
+          <span class="app-icon-name">카카오톡</span>
+        </div>
+        <div class="app-icon">
+          <div class="app-icon-img">📷</div>
+          <span class="app-icon-name">카메라</span>
+        </div>
+        <div class="app-icon">
+          <div class="app-icon-img">📞</div>
+          <span class="app-icon-name">전화</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW 3: 상단바 알림창 -->
+    <div class="screen-view" id="noti-screen">
+      <div class="noti-quick-settings">
+        <div class="quick-circle">📶</div>
+        <div class="quick-circle">🔊</div>
+        <div class="quick-circle">💡</div>
+        <div class="quick-circle">⚙️</div>
+      </div>
+
+      <div class="noti-card">
+        <div class="noti-header">
+          <span>💖 토닥토닥</span>
+          <span>• 지금</span>
+        </div>
+        <div class="noti-title" id="noti-title">📌 오늘 챙길 일 2개 남음</div>
+        <div class="noti-body" id="noti-body">
+          • 세탁소 정장 찾기<br>
+          • 아침 혈압약: 아직 안 드셨어요!
+        </div>
+        <button class="noti-action-btn" id="noti-action-btn" onclick="toggleRoutine()">
+          💊 약 먹었어요!
+        </button>
+      </div>
+    </div>
+
+    <!-- 할 일 추가 바텀시트 모달 -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeBottomSheet(event)">
+      <div class="bottom-sheet" onclick="event.stopPropagation()">
+        <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 14px;">✨ 새로운 할 일 등록</h3>
+
+        <div class="input-row">
+          <input type="text" class="task-input" id="new-task-input" placeholder="할 일을 적거나 마이크를 누르세요">
+          <button class="mic-btn" id="mic-btn" onclick="simulateVoiceInput()">🎙️</button>
+        </div>
+
+        <div style="font-size: 12px; color: #777; margin-bottom: 8px;">자주 쓰는 추천 태그 (터치 시 쏙 입력):</div>
+        <div class="chip-group">
+          <span class="chip" onclick="pickTag('🛒 마트 장보기')">🛒 마트 장보기</span>
+          <span class="chip" onclick="pickTag('🧺 세탁소 맡기기')">🧺 세탁소 맡기기</span>
+          <span class="chip" onclick="pickTag('💊 병원 / 약 챙기기')">💊 병원 / 약 챙기기</span>
+          <span class="chip" onclick="pickTag('🗑️ 분리수거')">🗑️ 분리수거</span>
+          <span class="chip" onclick="pickTag('🧹 청소 / 환기')">🧹 청소 / 환기</span>
+          <span class="chip" onclick="pickTag('💳 공과금 납부')">💳 공과금 납부</span>
+        </div>
+
+        <button class="submit-btn" id="submit-btn" onclick="addNewTask()">등록하기</button>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script>
+    // 테마 설정 (시각적 혼선 방지 3색)
+    const THEMES = {
+      wife: {
+        title: "🏠 아내와 나",
+        bg: "#FFF5F0",
+        accent: "#FF7A66",
+        text: "#2D2422",
+        routineTitle: "아침 혈압약 / 영양제 먹기",
+        initialTasks: [
+          { id: 1, title: "세탁소 정장 찾기", badge: "오늘 마감", done: false },
+          { id: 2, title: "마트에서 계란 & 우유 사기", badge: "오늘", done: false }
+        ]
+      },
+      mom: {
+        title: "👵 엄마와 나",
+        bg: "#F1F8F4",
+        accent: "#52A87A",
+        text: "#1E2B23",
+        routineTitle: "어머니 아침 혈압약 복용",
+        initialTasks: [
+          { id: 10, title: "어머니 댁 보일러 필터 점검", badge: "내일", done: false },
+          { id: 11, title: "정기 검진 병원 예약 확인", badge: "예정", done: true }
+        ]
+      },
+      friend: {
+        title: "👭 친구 영희",
+        bg: "#F0F7FF",
+        accent: "#4A90E2",
+        text: "#1E2835",
+        routineTitle: "매일 물 2L 마시기",
+        initialTasks: [
+          { id: 20, title: "주말 브런치 카페 예약하기", badge: "오늘", done: false }
+        ]
+      }
+    };
+
+    let currentSpaceKey = 'wife';
+    let spaceData = JSON.parse(JSON.stringify(THEMES));
+    let routineDone = false;
+    let routineDoneTime = "";
+
+    // 실시간 시계
+    function updateClock() {
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const mins = String(now.getMinutes()).padStart(2, '0');
+      document.getElementById('clock-time').textContent = `${hours}:${mins}`;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // 뷰 전환 (앱 / 위젯 / 알림창)
+    function switchView(viewName) {
+      document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.screen-view').forEach(view => view.classList.remove('active'));
+
+      const statusBar = document.getElementById('status-bar');
+
+      if (viewName === 'app') {
+        document.querySelectorAll('.mode-btn')[0].classList.add('active');
+        document.getElementById('app-screen').classList.add('active');
+        statusBar.className = "status-bar dark-text";
+      } else if (viewName === 'widget') {
+        document.querySelectorAll('.mode-btn')[1].classList.add('active');
+        document.getElementById('widget-screen').classList.add('active');
+        statusBar.className = "status-bar light-text";
+      } else if (viewName === 'noti') {
+        document.querySelectorAll('.mode-btn')[2].classList.add('active');
+        document.getElementById('noti-screen').classList.add('active');
+        statusBar.className = "status-bar light-text";
+      }
+    }
+
+    // 스페이스 전환 (혼선 방지 테마 적용)
+    function selectSpace(key) {
+      currentSpaceKey = key;
+      const theme = spaceData[key];
+
+      document.querySelectorAll('.space-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        btn.style.background = 'rgba(255, 255, 255, 0.8)';
+      });
+
+      const activeTab = document.getElementById(`tab-${key}`);
+      activeTab.classList.add('active');
+      activeTab.style.background = theme.accent;
+
+      // 앱 배경 및 스타일 동적 전환
+      document.getElementById('app-screen').style.backgroundColor = theme.bg;
+      document.getElementById('widget-container').style.backgroundColor = theme.bg;
+      document.documentElement.style.setProperty('--accent-coral', theme.accent);
+      document.documentElement.style.setProperty('--bg-coral', theme.bg);
+      document.documentElement.style.setProperty('--text-coral', theme.text);
+
+      document.getElementById('routine-title').textContent = theme.routineTitle;
+      document.getElementById('widget-title').textContent = theme.title;
+
+      renderTasks();
+      updateWidget();
+      updateNoti();
+      showToast(`'${theme.title}' 공간으로 전환되었습니다.`);
+    }
+
+    // 할 일 렌더링
+    function renderTasks() {
+      const listContainer = document.getElementById('task-list');
+      const tasks = spaceData[currentSpaceKey].initialTasks;
+      const uncompletedCount = tasks.filter(t => !t.done).length;
+
+      document.getElementById('section-title').textContent = 
+        uncompletedCount === 0 ? "오늘 챙길 일을 모두 마쳤어요! 💖" : `오늘 챙길 일 ${uncompletedCount}개 남음`;
+
+      listContainer.innerHTML = '';
+      tasks.forEach(task => {
+        const item = document.createElement('div');
+        item.className = `task-item ${task.done ? 'completed' : ''}`;
+        item.onclick = () => toggleTask(task.id);
+        item.innerHTML = `
+          <div class="checkbox-circle">
+            <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+          </div>
+          <div class="task-content">
+            <div class="task-name">${task.title}</div>
+            <span class="task-badge">${task.badge}</span>
+          </div>
+        `;
+        listContainer.appendChild(item);
+      });
+    }
+
+    // 할 일 토글
+    function toggleTask(id) {
+      const tasks = spaceData[currentSpaceKey].initialTasks;
+      const task = tasks.find(t => t.id === id);
+      if (task) {
+        task.done = !task.done;
+        renderTasks();
+        updateWidget();
+        updateNoti();
+        if (task.done) showToast("할 일을 완료했습니다! ✨");
+      }
+    }
+
+    // 약 먹기 루틴 토글 (핵심 안심 기능: 복용 시간 기록!)
+    function toggleRoutine() {
+      routineDone = !routineDone;
+      const card = document.getElementById('routine-card');
+      const btnText = document.getElementById('routine-btn-text');
+      const doneTimeSpan = document.getElementById('routine-done-time');
+
+      if (routineDone) {
+        const now = new Date();
+        const ampm = now.getHours() >= 12 ? "오후" : "오전";
+        const hour = String(now.getHours() % 12 || 12).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        routineDoneTime = `${ampm} ${hour}:${min}`;
+
+        card.classList.add('done');
+        doneTimeSpan.textContent = `${routineDoneTime} 완료`;
+        doneTimeSpan.style.display = 'inline';
+        btnText.textContent = `✅ 오늘 ${routineDoneTime} 복용 완료`;
+
+        showToast(`💊 복용 시각(${routineDoneTime})이 기록되었습니다! 오빠 폰에도 즉시 반영됩니다.`);
+      } else {
+        card.classList.remove('done');
+        doneTimeSpan.style.display = 'none';
+        btnText.textContent = "먹었어요! 터치해서 체크 💊";
+        routineDoneTime = "";
+      }
+
+      updateWidget();
+      updateNoti();
+    }
+
+    // 위젯 갱신
+    function updateWidget() {
+      const theme = spaceData[currentSpaceKey];
+      const tasks = theme.initialTasks;
+      const uncompletedCount = tasks.filter(t => !t.done).length;
+
+      document.getElementById('widget-summary').textContent = 
+        uncompletedCount === 0 ? "모두 완료 💖" : `${uncompletedCount}개 남음`;
+
+      const widgetRoutine = document.getElementById('widget-routine');
+      if (routineDone) {
+        widgetRoutine.className = "widget-routine-box done";
+        widgetRoutine.textContent = `✅ 약 복용 완료 (${routineDoneTime})`;
+      } else {
+        widgetRoutine.className = "widget-routine-box";
+        widgetRoutine.textContent = `💊 아침 약: 먹었어요! (탭하여 완료)`;
+      }
+
+      const widgetTasks = document.getElementById('widget-tasks');
+      widgetTasks.innerHTML = '';
+      tasks.slice(0, 2).forEach(task => {
+        const row = document.createElement('div');
+        row.className = 'widget-task-item';
+        row.onclick = () => toggleTask(task.id);
+        row.innerHTML = `
+          <span class="widget-task-check">${task.done ? '☑' : '☐'}</span>
+          <span class="widget-task-title" style="${task.done ? 'text-decoration: line-through; color: #888;' : ''}">${task.title}</span>
+        `;
+        widgetTasks.appendChild(row);
+      });
+    }
+
+    // 상단바 알림 갱신
+    function updateNoti() {
+      const theme = spaceData[currentSpaceKey];
+      const tasks = theme.initialTasks;
+      const uncompleted = tasks.filter(t => !t.done);
+
+      document.getElementById('noti-title').textContent = 
+        uncompleted.length === 0 ? "오늘 할 일 끝! 완벽해요 💖" : `📌 오늘 챙길 일 ${uncompleted.length}개 남음`;
+
+      const notiActionBtn = document.getElementById('noti-action-btn');
+      if (routineDone) {
+        document.getElementById('noti-body').innerHTML = `
+          • 약 복용: ${routineDoneTime} 완료 ✅<br>
+          • ${uncompleted.length > 0 ? uncompleted[0].title : '남은 할 일이 없습니다.'}
+        `;
+        notiActionBtn.style.display = 'none';
+      } else {
+        document.getElementById('noti-body').innerHTML = `
+          • 아침 약: 아직 안 드셨어요!<br>
+          • ${uncompleted.length > 0 ? uncompleted[0].title : '남은 할 일이 없습니다.'}
+        `;
+        notiActionBtn.style.display = 'inline-flex';
+      }
+    }
+
+    // 바텀시트 열기/닫기
+    function openBottomSheet() {
+      document.getElementById('modal-overlay').classList.add('open');
+      document.getElementById('new-task-input').value = '';
+      document.getElementById('new-task-input').focus();
+    }
+
+    function closeBottomSheet(e) {
+      document.getElementById('modal-overlay').classList.remove('open');
+    }
+
+    function pickTag(text) {
+      document.getElementById('new-task-input').value = text;
+    }
+
+    // 음성 인식 시뮬레이션
+    function simulateVoiceInput() {
+      const mic = document.getElementById('mic-btn');
+      mic.classList.add('listening');
+      showToast("🎙️ 음성을 듣고 있어요... 말씀해 주세요!");
+
+      setTimeout(() => {
+        mic.classList.remove('listening');
+        const simulatedVoice = ["내일 우유와 사과 사오기", "세탁소 정장 맡기기", "주말에 분리수거"][Math.floor(Math.random()*3)];
+        document.getElementById('new-task-input').value = simulatedVoice;
+        showToast(`인식 완료: "${simulatedVoice}"`);
+      }, 1500);
+    }
+
+    // 새 할 일 추가
+    function addNewTask() {
+      const input = document.getElementById('new-task-input');
+      const val = input.value.trim();
+      if (!val) return;
+
+      spaceData[currentSpaceKey].initialTasks.push({
+        id: Date.now(),
+        title: val,
+        badge: "오늘",
+        done: false
+      });
+
+      renderTasks();
+      updateWidget();
+      updateNoti();
+      closeBottomSheet();
+      showToast("새로운 할 일이 추가되었습니다! 🎉");
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 2200);
+    }
+
+    // 초기화 실행
+    selectSpace('wife');
+  </script>
+</body>
+</html>
