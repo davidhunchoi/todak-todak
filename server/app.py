@@ -44,30 +44,6 @@ def get_db():
     """
     if TURSO_DB_URL and TURSO_AUTH_TOKEN:
         import libsql_client
-        # libsql-client 0.3.x HTTP 응답에 error 키가 있을 때 KeyError('result') 대신
-        # 에러 메시지를 포함한 LibsqlError를 throw하도록 monkey-patch
-        try:
-            import libsql_client.http as _http_mod
-            _orig_send = _http_mod.HttpClient._send
-            if not getattr(_orig_send, "_todak_patched", False):
-                async def _patched_send(self, method, path, request_body):
-                    url = __import__('urllib.parse').parse.urljoin(self._url, path)
-                    async with self._session.request(method, url, json=request_body) as resp:
-                        response = await resp.json()
-                        # Check for error in response (libsql HTTP protocol)
-                        if resp.status == 200 and isinstance(response, dict):
-                            if "result" not in response and "error" in response:
-                                err = response.get("error", {})
-                                msg = err.get("message", "Unknown libsql error") if isinstance(err, dict) else str(err)
-                                code = err.get("code", "LIBSQL_ERROR") if isinstance(err, dict) else "LIBSQL_ERROR"
-                                print(f"[LIBSQL ERROR] {code}: {msg} | response: {response}", flush=True)
-                                raise _http_mod.LibsqlError(msg, code)
-                        return response
-                _patched_send._todak_patched = True
-                _http_mod.HttpClient._send = _patched_send
-        except Exception as _patch_err:
-            print(f"[PATCH] Failed to patch libsql HTTP: {_patch_err}", flush=True)
-
         url = TURSO_DB_URL.replace("libsql://", "https://")
         return libsql_client.create_client_sync(url=url, auth_token=TURSO_AUTH_TOKEN)
     else:
@@ -96,18 +72,68 @@ def _q(db, stmt, params=None):
     try:
         return db.execute(stmt, params)
     except KeyError as _ke:
-        # libsql-client: 서버가 SQL 오류를 HTTP 200 으로 반환할 때
-        # 응답에 "result" 키가 없어 KeyError 발생. 실제 오류 메시지 추출.
-        import json as _json
-        try:
-            _raw = getattr(db, "_last_response", None)
-            if _raw is None:
-                # SyncClient 내부 응답을 직접 조회하기 어려우므로,
-                # SQL 오류 원인을 히스토그램 형태로 출력
-                print(f"[SQL ERROR] KeyError on stmt: {stmt[:120]} | params: {params}", flush=True)
-        except Exception:
-            pass
+        _err_detail = _debug_libsql_error(stmt, params)
+        print(f"[SQL ERROR] KeyError('result') | stmt: {stmt[:200]} | params: {params} | libsql_detail: {_err_detail}", flush=True)
+        raise LibsqlQueryError(str(_err_detail)) from _ke
+    except Exception as _e:
+        print(f"[SQL ERROR] {type(_e).__name__} on stmt: {stmt[:200]} | params: {params} | err: {_e}", flush=True)
         raise
+
+
+class LibsqlQueryError(Exception):
+    """libsql 클라이언트에서 실제 SQL 에러 메시지를 추출해 전달"""
+
+
+def _debug_libsql_error(stmt, params):
+    """libsql HTTP 프로토콜로 직접 쿼리 실행하여 실제 에러 메시지 추출"""
+    if not (TURSO_DB_URL and TURSO_AUTH_TOKEN):
+        return "No Turso config"
+    try:
+        import urllib.request as _ulreq
+        import json as _json
+        url = TURSO_DB_URL.replace("libsql://", "https://")
+        args_list = []
+        if params:
+            for p in params:
+                if p is None:
+                    args_list.append({"null": True})
+                elif isinstance(p, bool):
+                    args_list.append({"bool_val": p})
+                elif isinstance(p, int):
+                    args_list.append({"int64_val": p})
+                elif isinstance(p, float):
+                    args_list.append({"real_val": p})
+                else:
+                    args_list.append({"string_val": str(p)})
+        request_body = {
+            "stmt": {
+                "sql": stmt,
+                "args": args_list,
+                "named_args": [],
+                "want_rows": True,
+            }
+        }
+        req = _ulreq.Request(
+            url.rstrip("/") + "/v2/pipeline",
+            data=_json.dumps(request_body).encode("utf-8"),
+            headers={"Authorization": f"Bearer {TURSO_AUTH_TOKEN}", "Content-Type": "application/json"},
+            method="POST"
+        )
+        with _ulreq.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, dict):
+                if "error" in data:
+                    return f"libsql error: {data['error']}"
+                if "result" in data:
+                    return "success (result present)"
+                return f"unknown response: {str(data)[:200]}"
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict) and "error" in item:
+                        return f"libsql error: {item['error']}"
+            return f"response: {str(data)[:300]}"
+    except Exception as e:
+        return f"debug request failed: {type(e).__name__}: {e}"
 
 
 def _execute_statements(db, sql):
