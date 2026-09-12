@@ -10,7 +10,7 @@ import java.util.Locale
 
 /**
  * 안드로이드 기본 내장 음성 인식(STT) 매니저
- * (별도 유료 API 없이 한국어 음성을 텍스트로 즉시 변환)
+ * (한국어 ko-KR 및 영어 en-US 다국어 완벽 지원, 넉넉한 발화 시간 확보)
  */
 class VoiceInputManager(private val context: Context) {
 
@@ -18,14 +18,23 @@ class VoiceInputManager(private val context: Context) {
 
     /**
      * 음성 인식 청취 시작
+     * @param languageCode "ko-KR" (한국어) 또는 "en-US" (영어), 미지정 시 시스템 언어 자동 감지
      */
     fun startListening(
+        languageCode: String? = null,
         onResult: (String) -> Unit,
         onError: (String) -> Unit
     ) {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             onError("이 기기에서는 음성 인식을 지원하지 않습니다.")
             return
+        }
+
+        // 대상 언어 결정 (지정값 -> 시스템 언어 -> 한국어 기본)
+        val targetLang = when {
+            !languageCode.isNullOrBlank() -> languageCode
+            Locale.getDefault().language == "en" -> "en-US"
+            else -> "ko-KR"
         }
 
         speechRecognizer?.destroy()
@@ -39,10 +48,22 @@ class VoiceInputManager(private val context: Context) {
 
                 override fun onError(error: Int) {
                     val message = when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH -> "말씀하신 내용을 인식하지 못했습니다. 다시 말씀해 주세요."
-                        SpeechRecognizer.ERROR_NETWORK -> "네트워크 연결을 확인해 주세요."
-                        SpeechRecognizer.ERROR_AUDIO -> "마이크 상태를 확인해 주세요."
-                        else -> "음성 인식 중 오류가 발생했습니다."
+                        SpeechRecognizer.ERROR_NO_MATCH -> {
+                            if (targetLang.startsWith("en")) "Could not recognize speech. Please try again."
+                            else "말씀하신 내용을 인식하지 못했습니다. 다시 말씀해 주세요."
+                        }
+                        SpeechRecognizer.ERROR_NETWORK -> {
+                            if (targetLang.startsWith("en")) "Please check your network connection."
+                            else "네트워크 연결을 확인해 주세요."
+                        }
+                        SpeechRecognizer.ERROR_AUDIO -> {
+                            if (targetLang.startsWith("en")) "Please check your microphone."
+                            else "마이크 상태를 확인해 주세요."
+                        }
+                        else -> {
+                            if (targetLang.startsWith("en")) "Voice recognition error occurred."
+                            else "음성 인식 중 오류가 발생했습니다."
+                        }
                     }
                     onError(message)
                 }
@@ -52,7 +73,7 @@ class VoiceInputManager(private val context: Context) {
                     if (!matches.isNullOrEmpty()) {
                         onResult(matches[0])
                     } else {
-                        onError("인식된 내용이 없습니다.")
+                        onError(if (targetLang.startsWith("en")) "No speech detected." else "인식된 내용이 없습니다.")
                     }
                 }
 
@@ -61,11 +82,21 @@ class VoiceInputManager(private val context: Context) {
             })
         }
 
+        val prompt = if (targetLang.startsWith("en")) "Please speak your task" else "할 일을 말씀해 주세요"
+
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.KOREA.toString())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, targetLang)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, targetLang)
+            putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, targetLang)
+            putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf(targetLang))
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "할 일을 말씀해 주세요")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, prompt)
+
+            // 여유로운 발화 대기 시간 (말씀 도중 숨을 고르셔도 안 끊기도록 넉넉하게 설정)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 4000L) // 최소 4초
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L) // 말 끝난 후 2.5초 침묵 대기
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
         }
 
         speechRecognizer?.startListening(intent)

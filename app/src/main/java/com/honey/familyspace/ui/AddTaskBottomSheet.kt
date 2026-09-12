@@ -59,6 +59,11 @@ fun AddTaskBottomSheet(
     var isListening by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    val initialLang = remember {
+        if (java.util.Locale.getDefault().language == "en") "en-US" else "ko-KR"
+    }
+    var selectedLang by remember { mutableStateOf(initialLang) }
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val quickTags = listOf(
@@ -92,13 +97,39 @@ fun AddTaskBottomSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
-            // 헤더
-            Text(
-                text = "✨ 새로운 할 일 등록",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(theme.textColor)
-            )
+            // 헤더 & 언어 전환 토글
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (selectedLang == "en-US") "✨ Add New Task" else "✨ 새로운 할 일 등록",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(theme.textColor)
+                )
+
+                // 원터치 언어 전환 토글 [🇰🇷 한국어] ↔ [🇺🇸 English]
+                Box(
+                    modifier = Modifier
+                        .background(
+                            color = Color(theme.accentHex).copy(alpha = 0.18f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clickable {
+                            selectedLang = if (selectedLang == "ko-KR") "en-US" else "ko-KR"
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (selectedLang == "ko-KR") "🇰🇷 한국어" else "🇺🇸 English",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(theme.textColor)
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -110,7 +141,12 @@ fun AddTaskBottomSheet(
                 OutlinedTextField(
                     value = taskTitle,
                     onValueChange = { taskTitle = it },
-                    placeholder = { Text("할 일을 입력하거나 마이크를 누르세요", fontSize = 15.sp) },
+                    placeholder = {
+                        Text(
+                            if (selectedLang == "en-US") "Type a task or tap mic" else "할 일을 입력하거나 마이크를 누르세요",
+                            fontSize = 15.sp
+                        )
+                    },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -128,6 +164,7 @@ fun AddTaskBottomSheet(
                         isListening = true
                         errorMessage = null
                         voiceManager.startListening(
+                            languageCode = selectedLang,
                             onResult = { spokenText ->
                                 isListening = false
                                 taskTitle = spokenText
@@ -155,8 +192,13 @@ fun AddTaskBottomSheet(
             }
 
             if (isListening) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text("🎙️ 듣고 있어요... 말씀해 주세요!", color = Color(theme.accentHex), fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                val msg = if (selectedLang == "en-US") {
+                    "🎙️ [English] Listening... speak comfortably!"
+                } else {
+                    "🎙️ [한국어] 듣고 있어요... 편하게 말씀해 주세요!"
+                }
+                Text(msg, color = Color(theme.accentHex), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
             if (errorMessage != null) {
                 Spacer(modifier = Modifier.height(6.dp))
