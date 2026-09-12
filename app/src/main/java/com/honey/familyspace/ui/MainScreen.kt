@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.honey.familyspace.data.DataStoreManager
+import com.honey.familyspace.data.InviteCodeGenerator
 import com.honey.familyspace.data.SpaceRepository
 import com.honey.familyspace.data.TaskRepository
 import com.honey.familyspace.model.DailyRoutine
@@ -563,6 +564,9 @@ private fun JoinSpaceDialog(
     var newTitle by remember { mutableStateOf("") }
     var isCreating by remember { mutableStateOf(false) }
 
+    // 연결하기 버튼은 유효한 6자리 코드가 모두 입력되었을 때만 활성화
+    val isCodeValid = InviteCodeGenerator.isValidCode(inputCode)
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isCreating) "새 방 만들기" else "초대 코드로 연결", fontWeight = FontWeight.Bold) },
@@ -579,8 +583,23 @@ private fun JoinSpaceDialog(
                 } else {
                     OutlinedTextField(
                         value = inputCode,
-                        onValueChange = { inputCode = it },
+                        onValueChange = { raw ->
+                            // 영문/숫자/하이픈만 허용하고, 3글자 + 하이픈 + 3글자 형태로 자동 포맷팅
+                            val cleaned = raw.filter { it.isLetterOrDigit() || it == '-' }.uppercase().take(7)
+                            inputCode = if (cleaned.length > 3 && !cleaned.contains('-')) {
+                                "${cleaned.substring(0, 3)}-${cleaned.substring(3)}"
+                            } else {
+                                cleaned
+                            }
+                        },
                         label = { Text("6자리 초대 코드 (예: H79-K2P)") },
+                        placeholder = { Text("H79-K2P") },
+                        isError = inputCode.isNotBlank() && !isCodeValid,
+                        supportingText = {
+                            if (inputCode.isNotBlank() && !isCodeValid) {
+                                Text("6자리 코드를 모두 입력해 주세요 (숫자, 영문 대문자)", fontSize = 12.sp)
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -592,11 +611,15 @@ private fun JoinSpaceDialog(
                 onClick = {
                     if (isCreating && newTitle.isNotBlank()) {
                         onCreateNew(newTitle, ThemeColor.GREEN)
-                    } else if (!isCreating && inputCode.isNotBlank()) {
+                    } else if (!isCreating && isCodeValid) {
                         onJoinCode(inputCode)
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(theme.accentHex))
+                enabled = if (isCreating) newTitle.isNotBlank() else isCodeValid,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(theme.accentHex),
+                    disabledContainerColor = Color(0xFFCCCCCC)
+                )
             ) {
                 Text(if (isCreating) "방 만들기" else "연결하기")
             }
