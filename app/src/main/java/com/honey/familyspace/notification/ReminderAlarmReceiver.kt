@@ -67,8 +67,8 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
 
     private suspend fun checkAndShowNotification(context: Context, dataStore: DataStoreManager) {
         val activeSpaceId = dataStore.activeSpaceIdFlow.first()
-        val spaceRepo = SpaceRepository(context)
-        val taskRepo = TaskRepository(context)
+        val spaceRepo = SpaceRepository(dataStore)
+        val taskRepo = TaskRepository(dataStore)
         val todayDate = DateTimeUtils.getTodayDateString()
 
         // 활성 스페이스가 없으면 첫 번째 스페이스 사용
