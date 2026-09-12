@@ -44,6 +44,30 @@ def get_db():
     """
     if TURSO_DB_URL and TURSO_AUTH_TOKEN:
         import libsql_client
+        # libsql-client 0.3.x HTTP 응답에 error 키가 있을 때 KeyError('result') 대신
+        # 에러 메시지를 포함한 LibsqlError를 throw하도록 monkey-patch
+        try:
+            import libsql_client.http as _http_mod
+            _orig_send = _http_mod.HttpClient._send
+            if not getattr(_orig_send, "_todak_patched", False):
+                async def _patched_send(self, method, path, request_body):
+                    url = __import__('urllib.parse').parse.urljoin(self._url, path)
+                    async with self._session.request(method, url, json=request_body) as resp:
+                        response = await resp.json()
+                        # Check for error in response (libsql HTTP protocol)
+                        if resp.status == 200 and isinstance(response, dict):
+                            if "result" not in response and "error" in response:
+                                err = response.get("error", {})
+                                msg = err.get("message", "Unknown libsql error") if isinstance(err, dict) else str(err)
+                                code = err.get("code", "LIBSQL_ERROR") if isinstance(err, dict) else "LIBSQL_ERROR"
+                                print(f"[LIBSQL ERROR] {code}: {msg} | response: {response}", flush=True)
+                                raise _http_mod.LibsqlError(msg, code)
+                        return response
+                _patched_send._todak_patched = True
+                _http_mod.HttpClient._send = _patched_send
+        except Exception as _patch_err:
+            print(f"[PATCH] Failed to patch libsql HTTP: {_patch_err}", flush=True)
+
         url = TURSO_DB_URL.replace("libsql://", "https://")
         return libsql_client.create_client_sync(url=url, auth_token=TURSO_AUTH_TOKEN)
     else:
@@ -69,7 +93,21 @@ def _q(db, stmt, params=None):
         return db.execute(stmt)
     if isinstance(params, tuple):
         params = list(params)
-    return db.execute(stmt, params)
+    try:
+        return db.execute(stmt, params)
+    except KeyError as _ke:
+        # libsql-client: 서버가 SQL 오류를 HTTP 200 으로 반환할 때
+        # 응답에 "result" 키가 없어 KeyError 발생. 실제 오류 메시지 추출.
+        import json as _json
+        try:
+            _raw = getattr(db, "_last_response", None)
+            if _raw is None:
+                # SyncClient 내부 응답을 직접 조회하기 어려우므로,
+                # SQL 오류 원인을 히스토그램 형태로 출력
+                print(f"[SQL ERROR] KeyError on stmt: {stmt[:120]} | params: {params}", flush=True)
+        except Exception:
+            pass
+        raise
 
 
 def _execute_statements(db, sql):
