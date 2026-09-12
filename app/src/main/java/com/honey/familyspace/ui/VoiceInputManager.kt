@@ -19,9 +19,13 @@ class VoiceInputManager(private val context: Context) {
     /**
      * 음성 인식 청취 시작
      * @param languageCode "ko-KR" (한국어) 또는 "en-US" (영어), 미지정 시 시스템 언어 자동 감지
+     * @param onPartialResult 말하는 도중 실시간 텍스트 전달
+     * @param onResult 최종 확정된 텍스트 전달
+     * @param onError 오류 발생 시 안내 메시지 전달
      */
     fun startListening(
         languageCode: String? = null,
+        onPartialResult: ((String) -> Unit)? = null,
         onResult: (String) -> Unit,
         onError: (String) -> Unit
     ) {
@@ -77,7 +81,13 @@ class VoiceInputManager(private val context: Context) {
                     }
                 }
 
-                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    if (!matches.isNullOrEmpty()) {
+                        onPartialResult?.invoke(matches[0])
+                    }
+                }
+
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
         }
@@ -92,6 +102,7 @@ class VoiceInputManager(private val context: Context) {
             putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf(targetLang))
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_PROMPT, prompt)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
 
             // 여유로운 발화 대기 시간 (말씀 도중 숨을 고르셔도 안 끊기도록 넉넉하게 설정)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 4000L) // 최소 4초
@@ -100,6 +111,24 @@ class VoiceInputManager(private val context: Context) {
         }
 
         speechRecognizer?.startListening(intent)
+    }
+
+    /**
+     * 사용자가 정지(Stop) 버튼을 눌렀을 때 즉시 인식 종료 및 결과 수신
+     */
+    fun stopListening() {
+        try {
+            speechRecognizer?.stopListening()
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 음성 인식 취소
+     */
+    fun cancel() {
+        try {
+            speechRecognizer?.cancel()
+        } catch (_: Exception) {}
     }
 
     /**

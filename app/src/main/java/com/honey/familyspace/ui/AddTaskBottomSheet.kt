@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DatePicker
@@ -83,7 +84,7 @@ fun AddTaskBottomSheet(
 
     val quickTags = listOf(
         "🛒 마트 장보기",
-        "🧺 세탁소 맡기기",
+        "🏃 운동 하기",
         "💊 병원 / 약 챙기기",
         "🗑️ 분리수거하기",
         "🧹 청소 / 환기",
@@ -173,33 +174,41 @@ fun AddTaskBottomSheet(
 
                 Spacer(modifier = Modifier.width(10.dp))
 
-                // 커다란 마이크 버튼
+                // 커다란 마이크 / 녹음 중지(■) 토글 버튼
                 IconButton(
                     onClick = {
-                        isListening = true
-                        errorMessage = null
-                        voiceManager.startListening(
-                            languageCode = selectedLang,
-                            onResult = { spokenText ->
-                                isListening = false
-                                taskTitle = spokenText
-                            },
-                            onError = { err ->
-                                isListening = false
-                                errorMessage = err
-                            }
-                        )
+                        if (isListening) {
+                            voiceManager.stopListening()
+                            isListening = false
+                        } else {
+                            isListening = true
+                            errorMessage = null
+                            voiceManager.startListening(
+                                languageCode = selectedLang,
+                                onPartialResult = { partialText ->
+                                    taskTitle = partialText
+                                },
+                                onResult = { spokenText ->
+                                    isListening = false
+                                    taskTitle = spokenText
+                                },
+                                onError = { err ->
+                                    isListening = false
+                                    errorMessage = err
+                                }
+                            )
+                        }
                     },
                     modifier = Modifier
                         .size(52.dp)
                         .background(
-                            color = if (isListening) Color(0xFFFF5252) else Color(theme.accentHex),
+                            color = if (isListening) Color(0xFFE53935) else Color(theme.accentHex),
                             shape = CircleShape
                         )
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "음성 입력",
+                        imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
+                        contentDescription = if (isListening) "녹음 중지" else "음성 입력",
                         tint = Color.White,
                         modifier = Modifier.size(28.dp)
                     )
@@ -209,11 +218,11 @@ fun AddTaskBottomSheet(
             if (isListening) {
                 Spacer(modifier = Modifier.height(8.dp))
                 val msg = if (selectedLang == "en-US") {
-                    "🎙️ [English] Listening... speak comfortably!"
+                    "🎙️ Listening... Tap ■ (Stop) when finished!"
                 } else {
-                    "🎙️ [한국어] 듣고 있어요... 편하게 말씀해 주세요!"
+                    "🎙️ 듣고 있어요... 말씀이 끝나면 ■ (네모)를 눌러주세요!"
                 }
-                Text(msg, color = Color(theme.accentHex), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(msg, color = Color(0xFFE53935), fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
             if (errorMessage != null) {
                 Spacer(modifier = Modifier.height(6.dp))

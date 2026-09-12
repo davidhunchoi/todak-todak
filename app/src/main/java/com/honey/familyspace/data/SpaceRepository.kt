@@ -29,18 +29,7 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
             .readTimeout(15, TimeUnit.SECONDS)
             .build()
 
-        private val spacesStateFlow = MutableStateFlow<List<Space>>(
-            listOf(
-                Space(
-                    id = "default-space-1",
-                    title = "우리 부부",
-                    themeColor = ThemeColor.CORAL.name,
-                    memberUids = listOf("user-1", "user-2"),
-                    createdBy = "user-1",
-                    createdAt = System.currentTimeMillis()
-                )
-            )
-        )
+        private val spacesStateFlow = MutableStateFlow<List<Space>>(emptyList())
     }
 
     /**
@@ -207,6 +196,49 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
 
         // 로컬 폴백: 새 코드 생성 (서버에 등록되지 않아 상대 연결은 서버 복구 후 필요)
         Result.success(InviteCodeGenerator.generateFormattedCode())
+    }
+
+    /**
+     * 서버에서 내가 참여 중인 모든 스페이스 목록 동기화
+     */
+    suspend fun syncSpacesFromServer(): Result<List<Space>> = withContext(Dispatchers.IO) {
+        val myUid = ensureAnonymousAuth()
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/api/users/$myUid/spaces")
+                .get()
+                .build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(IllegalStateException("스페이스 동기화 실패 (${response.code})"))
+            }
+            val resBody = response.body?.string() ?: ""
+            val json = JSONObject(resBody)
+            val arr = json.optJSONArray("spaces") ?: JSONArray()
+            val list = mutableListOf<Space>()
+            for (i in 0 until arr.length()) {
+                val s = arr.getJSONObject(i)
+                list.add(
+                    Space(
+                        id = s.getString("id"),
+                        title = s.getString("title"),
+                        themeColor = s.optString("theme_color", "CORAL"),
+                        memberUids = listOf(myUid),
+                        createdBy = s.optString("created_by", myUid),
+                        createdAt = s.optLong("created_at", System.currentTimeMillis())
+                    )
+                )
+            }
+            // 서버에 방이 있으면 서버 데이터로 갱신 (로컬 전용 방 보존)
+            if (list.isNotEmpty()) {
+                val serverIds = list.map { it.id }.toSet()
+                val locals = spacesStateFlow.value.filter { it.id !in serverIds }
+                spacesStateFlow.value = list + locals
+            }
+            Result.success(spacesStateFlow.value)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     /**

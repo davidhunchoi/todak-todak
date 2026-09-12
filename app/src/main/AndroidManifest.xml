@@ -20,6 +20,13 @@
     <!-- 앱 내 원터치 자동 업데이트 설치 권한 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Android 11+ 구글 음성 인식 엔진 서비스 패키지 가시성 쿼리 -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:name=".FamilySpaceApplication"
         android:allowBackup="true"
@@ -66,6 +73,15 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 주기적 잔소리 알림 브로드캐스트 리시버 -->
+        <receiver
+            android:name=".notification.ReminderAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.honey.familyspace.ACTION_TRIGGER_REMINDER" />
             </intent-filter>
         </receiver>
 

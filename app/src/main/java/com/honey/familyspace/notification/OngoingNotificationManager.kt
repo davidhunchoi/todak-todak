@@ -12,6 +12,7 @@ import com.honey.familyspace.data.TaskRepository
 import com.honey.familyspace.receiver.NotificationActionReceiver
 import com.honey.familyspace.ui.MainActivity
 import com.honey.familyspace.util.DateTimeUtils
+import com.honey.familyspace.widget.FamilySpaceWidget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
@@ -133,6 +134,11 @@ object OngoingNotificationManager {
 
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(NOTIFICATION_ID, builder.build())
+
+            // 홈 화면 대형 위젯 실시간 자동 갱신
+            try {
+                FamilySpaceWidget().updateAll(context)
+            } catch (_: Exception) {}
         }
     }
 }

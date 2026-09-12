@@ -20,6 +20,34 @@ class DataStoreManager(private val context: Context) {
         private val KEY_ACTIVE_SPACE_ID = stringPreferencesKey("active_space_id")
         private val KEY_USER_NICKNAME = stringPreferencesKey("user_nickname")
         private val KEY_USER_ID = stringPreferencesKey("user_id")
+        private val KEY_REMINDER_INTERVAL_HOURS = androidx.datastore.preferences.core.intPreferencesKey("reminder_interval_hours")
+        private val KEY_REMINDER_NIGHT_MUTE = androidx.datastore.preferences.core.booleanPreferencesKey("reminder_night_mute")
+    }
+
+    /**
+     * 알림 주기 (0: 끔, 1: 1시간, 2: 2시간, 3: 3시간, 4: 4시간 - 기본값: 2시간 권장)
+     */
+    val reminderIntervalHoursFlow: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[KEY_REMINDER_INTERVAL_HOURS] ?: 2
+    }
+
+    suspend fun setReminderIntervalHours(hours: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_REMINDER_INTERVAL_HOURS] = hours
+        }
+    }
+
+    /**
+     * 야간 수면 보호 (밤 10시 ~ 아침 8시 알림 무음/생략 - 기본값: true)
+     */
+    val reminderNightMuteFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_REMINDER_NIGHT_MUTE] ?: true
+    }
+
+    suspend fun setReminderNightMute(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_REMINDER_NIGHT_MUTE] = enabled
+        }
     }
 
     /**

@@ -26,7 +26,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Settings
+import com.honey.familyspace.widget.FamilySpaceWidget
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,9 +41,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import com.honey.familyspace.notification.ReminderScheduler
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -112,6 +118,12 @@ fun MainScreen(
     var createError by remember { mutableStateOf<String?>(null) }
     var generatedCode by remember { mutableStateOf<String?>(null) }
     var updateInfo by remember { mutableStateOf<AppUpdateManager.UpdateInfo?>(null) }
+    var editingTask by remember { mutableStateOf<Task?>(null) }
+
+    // 주기적 잔소리 알림 설정 상태
+    val reminderInterval by dataStore.reminderIntervalHoursFlow.collectAsState(initial = 2)
+    val reminderNightMute by dataStore.reminderNightMuteFlow.collectAsState(initial = true)
+    var showReminderSettingsDialog by remember { mutableStateOf(false) }
 
     // 방 삭제 관련 상태
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -120,12 +132,18 @@ fun MainScreen(
     var showDeleteConsentDialog by remember { mutableStateOf(false) }
     var consentTargetSpace by remember { mutableStateOf<Space?>(null) }
 
-    // 앱 실행 시 백엔드 서버에 새 버전(업데이트) 있는지 자동 확인
+    // 앱 실행 시 백엔드 서버에 새 버전(업데이트) 있는지 확인 및 내 방 목록 동기화
     LaunchedEffect(Unit) {
         val info = AppUpdateManager.checkForUpdate(context)
         if (info != null && info.hasUpdate) {
-            updateInfo = info
+            // 사용자 번거로움 0: 확인 팝업 없이 백그라운드 자동 다운로드 및 시스템 설치창 즉시 호출!
+            Toast.makeText(context, "🌸 최신 버전(v${info.versionName})을 준비합니다. 잠시 후 [설치]를 눌러주세요!", Toast.LENGTH_LONG).show()
+            AppUpdateManager.startDownloadAndInstall(context, info.apkUrl)
         }
+        spaceRepo.syncSpacesFromServer()
+
+        // 리마인더 알람 스케줄 확인 및 등록
+        ReminderScheduler.scheduleReminder(context, reminderInterval)
     }
 
     // 현재 스페이스의 매일 루틴 동기화 (화면 진입/스페이스 변경 시)
@@ -210,24 +228,33 @@ fun MainScreen(
                         )
                     )
 
-                    if (currentSpace != null) {
-                        IconButton(onClick = {
-                            // 현재 방의 초대 코드 조회 후 아내/가족 초대 다이얼로그 표시
-                            scope.launch {
-                                spaceRepo.getOrRefreshInviteCode(currentSpace.id).onSuccess { code ->
-                                    generatedCode = code
-                                    showInviteDialog = true
-                                }
-                            }
-                        }) {
-                            Icon(Icons.Default.PersonAdd, contentDescription = "가족 초대하기", tint = Color(currentTheme.accentHex))
-                        }
-                    } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // 1. 초대 코드 입력 버튼 (상시 노출)
                         IconButton(onClick = {
                             joinDialogCreating = false
+                            joinError = null
                             showJoinDialog = true
                         }) {
-                            Icon(Icons.Default.PersonAdd, contentDescription = "초대 코드로 연결", tint = Color(currentTheme.accentHex))
+                            Icon(Icons.Default.Key, contentDescription = "초대 코드 입력", tint = Color(currentTheme.accentHex))
+                        }
+
+                        // 2. 방 초대하기 버튼
+                        if (currentSpace != null) {
+                            IconButton(onClick = {
+                                scope.launch {
+                                    spaceRepo.getOrRefreshInviteCode(currentSpace.id).onSuccess { code ->
+                                        generatedCode = code
+                                        showInviteDialog = true
+                                    }
+                                }
+                            }) {
+                                Icon(Icons.Default.PersonAdd, contentDescription = "가족 초대하기", tint = Color(currentTheme.accentHex))
+                            }
+                        }
+
+                        // 3. 리마인더 알림 설정 버튼
+                        IconButton(onClick = { showReminderSettingsDialog = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "알림 설정", tint = Color(currentTheme.accentHex))
                         }
                     }
                 }
@@ -269,8 +296,39 @@ fun MainScreen(
                     }
 
                     item {
+                        IconButton(onClick = {
+                            joinDialogCreating = false
+                            joinError = null
+                            showJoinDialog = true
+                        }) {
+                            Icon(Icons.Default.Key, contentDescription = "초대 코드 입력", tint = Color(currentTheme.accentHex))
+                        }
+                    }
+
+                    item {
+                        IconButton(onClick = {
+                            currentSpace?.let { space ->
+                                scope.launch {
+                                    spaceRepo.getOrRefreshInviteCode(space.id).onSuccess { code ->
+                                        generatedCode = code
+                                        showInviteDialog = true
+                                    }
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Default.PersonAdd, contentDescription = "방 초대하기", tint = Color(currentTheme.accentHex))
+                        }
+                    }
+
+                    item {
                         IconButton(onClick = { showJoinDialog = true; joinDialogCreating = true }) {
                             Icon(Icons.Default.Add, contentDescription = "새 방 추가", tint = Color(currentTheme.accentHex))
+                        }
+                    }
+
+                    item {
+                        IconButton(onClick = { showReminderSettingsDialog = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "알림 설정", tint = Color(currentTheme.accentHex))
                         }
                     }
                 }
@@ -331,9 +389,11 @@ fun MainScreen(
                 return@Column
             }
 
-            // 3. 오늘 할 일 상태 요약 배너
-            val uncompletedCount = tasks.count { !it.isCompleted }
-            val bannerText = if (uncompletedCount == 0) "오늘 챙길 일을 모두 마쳤어요! 💖" else "오늘 챙길 일 ${uncompletedCount}개 남음"
+            // 3. 오늘 할 일 상태 요약 배너 (일반 할 일 + 매일 루틴 통합)
+            val uncompletedTasksCount = tasks.count { !it.isCompleted }
+            val uncompletedRoutinesCount = routines.count { !it.isCompletedToday(todayDate) }
+            val totalUncompletedCount = uncompletedTasksCount + uncompletedRoutinesCount
+            val bannerText = if (totalUncompletedCount == 0) "오늘 챙길 일을 모두 마쳤어요! 💖" else "오늘 챙길 일 ${totalUncompletedCount}개 남음"
 
             Text(
                 text = bannerText,
@@ -357,7 +417,7 @@ fun MainScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    // 매일 반복 루틴 카드 (나와 상대 각각 체크)
+                    // 매일 반복 루틴 카드
                     items(routines) { routine ->
                         RoutineCardItem(
                             routine = routine,
@@ -371,6 +431,15 @@ fun MainScreen(
                                         taskRepo.syncRoutinesFromServer(space.id)
                                     }
                                     OngoingNotificationManager.updateOngoingNotification(context)
+                                }
+                            },
+                            onLongClick = {
+                                scope.launch {
+                                    currentSpace?.let { space ->
+                                        taskRepo.deleteRoutine(space.id, routine.id)
+                                        OngoingNotificationManager.updateOngoingNotification(context)
+                                        Toast.makeText(context, "'${routine.title}' 루틴을 삭제했어요", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         )
@@ -389,11 +458,37 @@ fun MainScreen(
                                     }
                                     OngoingNotificationManager.updateOngoingNotification(context)
                                 }
+                            },
+                            onLongClick = {
+                                editingTask = task
                             }
                         )
                     }
                 }
             }
+        }
+    }
+
+    // 할 일 수정 및 삭제 바텀시트
+    editingTask?.let { taskToEdit ->
+        if (currentSpace != null) {
+            EditTaskBottomSheet(
+                task = taskToEdit,
+                theme = currentTheme,
+                onDismiss = { editingTask = null },
+                onUpdateTask = { newTitle, newDueDate ->
+                    scope.launch {
+                        taskRepo.updateTask(currentSpace.id, taskToEdit.id, newTitle, newDueDate)
+                        OngoingNotificationManager.updateOngoingNotification(context)
+                    }
+                },
+                onDeleteTask = {
+                    scope.launch {
+                        taskRepo.deleteTask(currentSpace.id, taskToEdit.id)
+                        OngoingNotificationManager.updateOngoingNotification(context)
+                    }
+                }
+            )
         }
     }
 
@@ -419,12 +514,47 @@ fun MainScreen(
 
     // 4자리 초대 코드 확인 다이얼로그
     if (showInviteDialog && generatedCode != null) {
+        val roomTitle = currentSpace?.title ?: "우리 공간"
         AlertDialog(
             onDismissRequest = { showInviteDialog = false },
-            title = { Text("우리 집 초대 코드", fontWeight = FontWeight.Bold) },
+            title = { Text("🏡 '${roomTitle}' 초대 코드", fontWeight = FontWeight.Bold) },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("아내(가족) 폰의 토닥토닥 앱에서\n아래 4자리 코드를 입력해 주세요:", fontSize = 14.sp)
+                    if (mySpaces.size > 1) {
+                        Text("초대할 방 선택:", fontSize = 13.sp, color = Color.Gray)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(mySpaces) { s ->
+                                val isSel = s.id == currentSpace?.id
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (isSel) Color(currentTheme.accentHex) else Color(0xFFF0F0F0),
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                        .clickable {
+                                            scope.launch {
+                                                dataStore.setActiveSpaceId(s.id)
+                                                spaceRepo.getOrRefreshInviteCode(s.id).onSuccess { c ->
+                                                    generatedCode = c
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        s.title,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSel) Color.White else Color(0xFF555555)
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    Text("초대받을 분의 토닥토닥 앱에서\n아래 4자리 코드를 입력해 주세요:", fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = generatedCode ?: "",
@@ -440,9 +570,8 @@ fun MainScreen(
                         color = Color.Gray
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    // 앱 미설치 가족을 위한 설치 링크 안내 (카톡은 .apk 직접 전송이 차단되므로 링크로 안내)
                     Text(
-                        "👇 아내 폰에 아직 앱이 없나요?\n아래 주소를 길게 눌러 복사해서 보내고,\n스마트폰 브라우저에서 열어 설치하면 돼요:",
+                        "👇 아직 앱이 설치되지 않았다면 링크를 전달해 주세요:",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(currentTheme.textColor)
@@ -453,24 +582,32 @@ fun MainScreen(
                         fontSize = 13.sp,
                         color = Color(currentTheme.accentHex)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "다시 보려면 상단의 👤 초대 아이콘을 눌러 주세요.\n(방 삭제는 방 이름을 길게 눌러 주세요.)",
-                        fontSize = 12.sp,
-                        color = Color.Gray
-                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // 상대방 초대 코드 입력 화면으로 전환 버튼
+                    TextButton(
+                        onClick = {
+                            showInviteDialog = false
+                            joinDialogCreating = false
+                            joinError = null
+                            showJoinDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth().background(Color(0xFFF5F5F5), RoundedCornerShape(12.dp))
+                    ) {
+                        Text("🔑 혹시 초대 코드를 받으셨나요? [코드 입력하기]", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(currentTheme.accentHex))
+                    }
                 }
             },
             confirmButton = {
                 // 카톡/문자 등 공유 앱으로 [앱 설치 링크 + 초대 코드] 함께 전송
                 TextButton(onClick = {
                     val shareText =
-                        "🏡 토닥토닥(우리 집 앱)에서 함께 할 일을 관리해요 🌸\n\n" +
-                        "📝 초대 코드: ${generatedCode}\n" +
+                        "🏡 토닥토닥 '${roomTitle}'에 초대합니다 🌸\n\n" +
+                        "📝 4자리 초대 코드: ${generatedCode}\n" +
                         "(10분 안에 입력해 주세요)\n\n" +
                         "만약 아직 앱이 없다면 아래 링크를 눌러 먼저 설치해 주세요 ↓\n" +
                         "https://todak-todak.onrender.com/download/app-latest.apk\n\n" +
-                        "설치 후 토닥토닥 앱의 [초대 코드 입력]에\n'${generatedCode}'를 입력하면 바로 연결돼요!"
+                        "설치 후 토닥토닥 앱 상단의 [초대 코드 입력(열쇠 아이콘)]에\n'${generatedCode}'를 입력하면 바로 연결돼요!"
                     val sendIntent = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
                         putExtra(Intent.EXTRA_TEXT, shareText)
@@ -485,6 +622,116 @@ fun MainScreen(
             dismissButton = {
                 TextButton(onClick = { showInviteDialog = false }) {
                     Text("확인")
+                }
+            }
+        )
+    }
+
+    // 주기적 잔소리 알림 설정 다이얼로그
+    if (showReminderSettingsDialog) {
+        var tempInterval by remember { mutableStateOf(reminderInterval) }
+        var tempNightMute by remember { mutableStateOf(reminderNightMute) }
+
+        AlertDialog(
+            onDismissRequest = { showReminderSettingsDialog = false },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = Color.White,
+            title = {
+                Text("⏰ 할 일 잔소리 알림 설정", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(currentTheme.textColor))
+            },
+            text = {
+                Column {
+                    Text(
+                        "설정된 시간마다 오늘 남은 할 일이 있으면 화면 상단에 알림으로 알려드려요.",
+                        fontSize = 13.sp,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text("알림 반복 간격", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(currentTheme.textColor))
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val intervalOptions = listOf(
+                        0 to "끄기 (알림 받지 않음)",
+                        1 to "1시간마다",
+                        2 to "2시간마다 (권장 💡)",
+                        3 to "3시간마다",
+                        4 to "4시간마다"
+                    )
+
+                    intervalOptions.forEach { (hours, label) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { tempInterval = hours }
+                                .padding(vertical = 6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .background(
+                                        color = if (tempInterval == hours) Color(currentTheme.accentHex) else Color(0xFFE0E0E0),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (tempInterval == hours) {
+                                    Box(modifier = Modifier.size(8.dp).background(Color.White, CircleShape))
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = label,
+                                fontSize = 14.sp,
+                                fontWeight = if (tempInterval == hours) FontWeight.Bold else FontWeight.Normal,
+                                color = if (tempInterval == hours) Color(currentTheme.textColor) else Color.DarkGray
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFF7F7F7), RoundedCornerShape(12.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("야간 수면 보호 🌙", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("밤 10시 ~ 아침 8시 사이에는 알림을 울리지 않아요", fontSize = 12.sp, color = Color.Gray)
+                        }
+                        Switch(
+                            checked = tempNightMute,
+                            onCheckedChange = { tempNightMute = it }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            dataStore.setReminderIntervalHours(tempInterval)
+                            dataStore.setReminderNightMute(tempNightMute)
+                            ReminderScheduler.scheduleReminder(context, tempInterval)
+                            showReminderSettingsDialog = false
+                            val msg = if (tempInterval == 0) "잔소리 알림을 껐어요" else "${tempInterval}시간마다 남은 할 일을 알려드릴게요 ⏰"
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(currentTheme.accentHex)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("설정 저장", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReminderSettingsDialog = false }) {
+                    Text("취소", color = Color.Gray)
                 }
             }
         )
@@ -684,14 +931,17 @@ fun MainScreen(
 }
 
 /**
- * 개별 할 일 카드 컴포넌트
+/**
+ * 개별 할 일 카드 컴포넌트 (짧게 누르면 완료 토글, 길게 누르면 수정/삭제)
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TaskCardItem(
     task: Task,
     todayDate: String,
     theme: ThemeColor,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     val badge = task.getDueBadge(todayDate)
 
@@ -703,7 +953,10 @@ private fun TaskCardItem(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onToggle() }
+            .combinedClickable(
+                onClick = onToggle,
+                onLongClick = onLongClick
+            )
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -756,27 +1009,33 @@ private fun TaskCardItem(
 
 /**
  * 매일 반복 루틴 카드 컴포넌트
- * "나"와 "상대(아내/남편)"가 각각 따로 체크하는 매일 하는 일 (예: 약 먹기)
+ * 상대 검토 등 복잡한 요소를 배제하고 직관적인 완료 토글 버튼 및 롱클릭 삭제 지원
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RoutineCardItem(
     routine: DailyRoutine,
     todayDate: String,
     theme: ThemeColor,
-    onCheck: () -> Unit
+    onCheck: () -> Unit,
+    onLongClick: () -> Unit
 ) {
-    val isMyDone = routine.isCompletedToday(todayDate)
-    val isPartnerDone = routine.isPartnerCompletedToday(todayDate)
+    val isDone = routine.isCompletedToday(todayDate)
 
     Card(
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isMyDone && isPartnerDone) Color(0xFFE8F5E9) else Color.White
+            containerColor = if (isDone) Color(0xFFF1F8E9) else Color.White
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onCheck,
+                onLongClick = onLongClick
+            )
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -784,72 +1043,47 @@ private fun RoutineCardItem(
             ) {
                 Text(
                     text = "🔁 매일 반복",
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(theme.accentHex)
                 )
 
-                Text(
-                    text = when {
-                        isMyDone && isPartnerDone -> "둘 다 완료! ✅"
-                        isMyDone -> "나만 완료 (상대 대기중)"
-                        isPartnerDone -> "상대 완료 (나 대기중)"
-                        else -> ""
-                    },
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isMyDone && isPartnerDone) Color(0xFF2E7D32) else Color(0xFF757575)
-                )
+                if (isDone) {
+                    Text(
+                        text = "오늘 완료! ✅ (${routine.lastCompletedTime})",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2E7D32)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = routine.title,
-                fontSize = 18.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(theme.textColor)
+                color = if (isDone) Color(0xFF757575) else Color(theme.textColor),
+                textDecoration = if (isDone) TextDecoration.LineThrough else TextDecoration.None
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 나의 오늘 체크 버튼
+            // 일반 할 일처럼 심플하고 직관적인 완료 토글 버튼
             Button(
-                onClick = { if (!isMyDone) onCheck() },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(14.dp),
+                onClick = onCheck,
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isMyDone) Color(0xFFC8E6C9) else Color(theme.accentHex)
-                ),
-                enabled = !isMyDone
-            ) {
-                Text(
-                    text = if (isMyDone) "✅ 나 완료! (${routine.lastCompletedTime})" else "나 했어요! 터치해서 체크",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isMyDone) Color(0xFF1B5E20) else Color.White
+                    containerColor = if (isDone) Color(0xFFC8E6C9) else Color(theme.accentHex)
                 )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // 상대방 오늘 체크 상태 (서버 동기화)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        color = if (isPartnerDone) Color(0xFFE8F5E9) else Color(0xFFF5F5F5),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
                 Text(
-                    text = if (isPartnerDone) "👤 상대 완료! (${routine.partnerCompletedTime})" else "👤 상대: 아직 체크 전이에요",
-                    fontSize = 14.sp,
+                    text = if (isDone) "✅ 완료했어요 (터치하여 취소)" else "먹었어요 / 완료하기",
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isPartnerDone) Color(0xFF2E7D32) else Color(0xFF777777)
+                    color = if (isDone) Color(0xFF1B5E20) else Color.White
                 )
             }
         }

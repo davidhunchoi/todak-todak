@@ -145,6 +145,28 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         Result.success(Unit)
     }
 
+    suspend fun updateTask(spaceId: String, taskId: String, newTitle: String, newDueDate: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val flow = getTaskFlow(spaceId)
+        flow.value = flow.value.map {
+            if (it.id == taskId) it.copy(title = newTitle, dueDate = newDueDate)
+            else it
+        }
+
+        try {
+            val jsonBody = JSONObject().apply {
+                put("title", newTitle)
+                put("due_date", newDueDate)
+            }
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/tasks/$taskId")
+                .patch(jsonBody.toString().toRequestBody(JSON))
+                .build()
+            client.newCall(request).execute()
+        } catch (_: Exception) {}
+
+        Result.success(Unit)
+    }
+
     suspend fun deleteTask(spaceId: String, taskId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val flow = getTaskFlow(spaceId)
         flow.value = flow.value.filter { it.id != taskId }

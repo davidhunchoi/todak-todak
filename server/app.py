@@ -504,21 +504,42 @@ def add_task(space_id):
 
 
 @app.route("/api/spaces/<space_id>/tasks/<task_id>", methods=["PATCH"])
-def toggle_task(space_id, task_id):
-    """할 일 완료 토글"""
+def update_or_toggle_task(space_id, task_id):
+    """할 일 수정 및 완료 토글"""
     data = request.json or {}
-    is_completed = data.get("is_completed", True)
-    now_ms = int(time.time() * 1000) if is_completed else None
-
     db = get_db()
     try:
-        db.execute(
-            "UPDATE tasks SET is_completed = ?, completed_at = ? WHERE id = ? AND space_id = ?",
-            (1 if is_completed else 0, now_ms, task_id, space_id)
-        )
+        if "is_completed" in data:
+            is_completed = data.get("is_completed", True)
+            now_ms = int(time.time() * 1000) if is_completed else None
+            db.execute(
+                "UPDATE tasks SET is_completed = ?, completed_at = ? WHERE id = ? AND space_id = ?",
+                (1 if is_completed else 0, now_ms, task_id, space_id)
+            )
+        if "title" in data:
+            title = data.get("title", "").strip()
+            due_date = data.get("due_date", "")
+            db.execute(
+                "UPDATE tasks SET title = ?, due_date = ? WHERE id = ? AND space_id = ?",
+                (title, due_date, task_id, space_id)
+            )
         if hasattr(db, "commit"):
             db.commit()
         return jsonify({"message": "수정되었습니다."}), 200
+    finally:
+        if hasattr(db, "close"):
+            db.close()
+
+
+@app.route("/api/spaces/<space_id>/tasks/<task_id>", methods=["DELETE"])
+def delete_task(space_id, task_id):
+    """할 일 삭제"""
+    db = get_db()
+    try:
+        db.execute("DELETE FROM tasks WHERE id = ? AND space_id = ?", (task_id, space_id))
+        if hasattr(db, "commit"):
+            db.commit()
+        return jsonify({"message": "삭제되었습니다."}), 200
     finally:
         if hasattr(db, "close"):
             db.close()
@@ -683,11 +704,29 @@ def check_routine(space_id, routine_id):
             db.close()
 
 
+@app.route("/api/spaces/<space_id>/routines/<routine_id>", methods=["DELETE"])
+def delete_routine(space_id, routine_id):
+    """매일 반복 루틴 삭제"""
+    db = get_db()
+    try:
+        db.execute("DELETE FROM routines WHERE id = ? AND space_id = ?", (routine_id, space_id))
+        try:
+            db.execute("DELETE FROM routine_checks WHERE routine_id = ?", (routine_id,))
+        except Exception:
+            pass
+        if hasattr(db, "commit"):
+            db.commit()
+        return jsonify({"message": "루틴이 삭제되었습니다."}), 200
+    finally:
+        if hasattr(db, "close"):
+            db.close()
+
+
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 3
-CURRENT_APP_VERSION_NAME = "1.2.0"
+CURRENT_APP_VERSION_CODE = 4
+CURRENT_APP_VERSION_NAME = "1.3.0"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -696,7 +735,7 @@ def get_app_version():
         "version_code": CURRENT_APP_VERSION_CODE,
         "version_name": CURRENT_APP_VERSION_NAME,
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk",
-        "changelog": "🎉 v1.2.0\n- 4자리 숫자 초대 코드 (카톡으로 설치 링크+코드 한 번에 전송)\n- 매일 반복 루틴 등록 (나와 상대 각각 체크)\n- 캘린더로 마감 날짜 직접 선택\n- 방 이름 중복 방지 & 상대 동의 받은 방 삭제"
+        "changelog": "🎉 v1.3.0\n- 오늘 챙길 일 카운트에 매일 루틴 통합\n- 루틴 카드 원터치 완료 토글 및 심플 디자인 개편\n- 카드 길게 눌러 내용/날짜 수정 및 즉시 삭제 지원\n- 상단 초대 코드 입력 버튼 상시 제공 및 중립 초대 문구\n- 홈 화면 위젯 실시간 자동 갱신\n- 음성 인식 개선: 녹음 중지 버튼(■) 및 실시간 자막 스트리밍\n- 자주 쓰는 태그 '운동 하기' 추가"
     }), 200
 
 
