@@ -1,7 +1,6 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("com.google.gms.google-services")
 }
 
 android {
@@ -71,12 +70,8 @@ dependencies {
     implementation("androidx.glance:glance-appwidget:1.0.0")
     implementation("androidx.glance:glance-material3:1.0.0")
 
-    // Firebase (BOM 기반 최신 버전 관리)
-    val firebaseBom = platform("com.google.firebase:firebase-bom:32.7.2")
-    implementation(firebaseBom)
-    implementation("com.google.firebase:firebase-analytics")
-    implementation("com.google.firebase:firebase-auth-ktx")
-    implementation("com.google.firebase:firebase-firestore-ktx")
+    // 서버 통신 (OkHttp for Render API)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Jetpack DataStore (로컬 설정 저장)
     implementation("androidx.datastore:datastore-preferences:1.0.0")
@@ -86,15 +81,9 @@ dependencies {
 
     // 코루틴
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
-    // 테스트 의존성
+    // 테스트 및 툴링
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
-    androidTestImplementation(composeBom)
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
-    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

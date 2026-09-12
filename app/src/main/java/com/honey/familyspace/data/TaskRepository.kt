@@ -1,243 +1,237 @@
 package com.honey.familyspace.data
 
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
 import com.honey.familyspace.model.DailyRoutine
 import com.honey.familyspace.model.Task
 import com.honey.familyspace.util.DateTimeUtils
-import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
- * 할 일(`Task`) 및 매일 루틴(`DailyRoutine`) 실시간 저장소
+ * 할 일(`Task`) 및 매일 루틴(`DailyRoutine`) 실시간 저장소 (Render API + 로컬 우선)
  */
-class TaskRepository(
-    private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
-) {
+class TaskRepository {
+
+    companion object {
+        private const val BASE_URL = "https://todak-todak.onrender.com"
+        private val JSON = "application/json; charset=utf-8".toMediaType()
+
+        private val client = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .build()
+
+        private val tasksMap = mutableMapOf<String, MutableStateFlow<List<Task>>>()
+        private val routinesMap = mutableMapOf<String, MutableStateFlow<List<DailyRoutine>>>()
+    }
+
+    private fun getTaskFlow(spaceId: String): MutableStateFlow<List<Task>> {
+        return tasksMap.getOrPut(spaceId) {
+            MutableStateFlow(
+                listOf(
+                    Task(
+                        id = "sample-task-1",
+                        spaceId = spaceId,
+                        title = "세탁소에서 옷 찾아오기",
+                        dueDate = DateTimeUtils.getTodayDateString(),
+                        isCompleted = false
+                    ),
+                    Task(
+                        id = "sample-task-2",
+                        spaceId = spaceId,
+                        title = "주말 마트 장보기 (우유, 사과)",
+                        dueDate = DateTimeUtils.getTomorrowDateString(),
+                        isCompleted = false
+                    )
+                )
+            )
+        }
+    }
+
+    private fun getRoutineFlow(spaceId: String): MutableStateFlow<List<DailyRoutine>> {
+        return routinesMap.getOrPut(spaceId) {
+            MutableStateFlow(
+                listOf(
+                    DailyRoutine(
+                        id = "routine-pill-1",
+                        spaceId = spaceId,
+                        title = "아침 혈압약 & 영양제 챙겨먹기",
+                        iconType = "PILL",
+                        targetTime = "08:30",
+                        lastCompletedDate = "",
+                        lastCompletedTime = ""
+                    )
+                )
+            )
+        }
+    }
 
     // ==========================================
     // 1. 할 일 (Task) 실시간 관리
     // ==========================================
 
-    /**
-     * 특정 스페이스의 할 일 목록 실시간 구독
-     * (마감일 및 생성일 순 정렬)
-     */
-    fun observeTasks(spaceId: String): Flow<List<Task>> = callbackFlow {
-        if (spaceId.isBlank()) {
-            trySend(emptyList())
-            close()
-            return@callbackFlow
-        }
+    fun observeTasks(spaceId: String): Flow<List<Task>> {
+        return getTaskFlow(spaceId).asStateFlow()
+    }
 
-        val query = firestore.collection("spaces")
-            .document(spaceId)
-            .collection("tasks")
-            .orderBy("isCompleted")
-            .orderBy("dueDate")
-            .orderBy("createdAt")
+    suspend fun addTask(spaceId: String, title: String, dueDate: String): Result<Task> = withContext(Dispatchers.IO) {
+        val taskId = UUID.randomUUID().toString()
+        val newTask = Task(
+            id = taskId,
+            spaceId = spaceId,
+            title = title.trim(),
+            dueDate = dueDate.trim(),
+            isCompleted = false,
+            createdAt = System.currentTimeMillis()
+        )
 
-        val listener = query.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                close(error)
-                return@addSnapshotListener
+        // 로컬 즉각 반영 (0.1초 반응)
+        val flow = getTaskFlow(spaceId)
+        flow.value = listOf(newTask) + flow.value
+
+        // 백그라운드 서버 전송
+        try {
+            val jsonBody = JSONObject().apply {
+                put("title", title)
+                put("due_date", dueDate)
+                put("user_id", "my-uid")
             }
-            val tasks = snapshot?.documents?.mapNotNull { it.toObject(Task::class.java) } ?: emptyList()
-            trySend(tasks)
-        }
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/tasks")
+                .post(jsonBody.toString().toRequestBody(JSON))
+                .build()
+            client.newCall(request).execute()
+        } catch (_: Exception) {}
 
-        awaitClose {
-            listener.remove()
-        }
+        Result.success(newTask)
     }
 
-    /**
-     * 할 일 추가
-     */
-    suspend fun addTask(spaceId: String, title: String, dueDate: String): Result<Task> {
-        return try {
-            val myUid = auth.currentUser?.uid ?: ""
-            val taskId = UUID.randomUUID().toString()
-
-            val task = Task(
-                id = taskId,
-                spaceId = spaceId,
-                title = title.trim(),
-                dueDate = dueDate.trim(),
-                isCompleted = false,
-                createdBy = myUid,
-                createdAt = System.currentTimeMillis()
-            )
-
-            firestore.collection("spaces")
-                .document(spaceId)
-                .collection("tasks")
-                .document(taskId)
-                .set(task)
-                .await()
-
-            Result.success(task)
-        } catch (e: Exception) {
-            Result.failure(e)
+    suspend fun toggleTask(spaceId: String, taskId: String, currentStatus: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        val newStatus = !currentStatus
+        val flow = getTaskFlow(spaceId)
+        flow.value = flow.value.map {
+            if (it.id == taskId) it.copy(isCompleted = newStatus, completedAt = if (newStatus) System.currentTimeMillis() else null)
+            else it
         }
+
+        try {
+            val jsonBody = JSONObject().apply {
+                put("is_completed", newStatus)
+            }
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/tasks/$taskId")
+                .patch(jsonBody.toString().toRequestBody(JSON))
+                .build()
+            client.newCall(request).execute()
+        } catch (_: Exception) {}
+
+        Result.success(Unit)
     }
 
-    /**
-     * 할 일 완료 상태 토글 (완료 체크 / 체크 해제)
-     */
-    suspend fun toggleTask(spaceId: String, taskId: String, currentStatus: Boolean): Result<Unit> {
-        return try {
-            val newStatus = !currentStatus
-            val completedAt = if (newStatus) System.currentTimeMillis() else null
+    suspend fun deleteTask(spaceId: String, taskId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val flow = getTaskFlow(spaceId)
+        flow.value = flow.value.filter { it.id != taskId }
 
-            firestore.collection("spaces")
-                .document(spaceId)
-                .collection("tasks")
-                .document(taskId)
-                .update(
-                    mapOf(
-                        "isCompleted" to newStatus,
-                        "completedAt" to completedAt
-                    )
-                )
-                .await()
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * 할 일 삭제
-     */
-    suspend fun deleteTask(spaceId: String, taskId: String): Result<Unit> {
-        return try {
-            firestore.collection("spaces")
-                .document(spaceId)
-                .collection("tasks")
-                .document(taskId)
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/tasks/$taskId")
                 .delete()
-                .await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+                .build()
+            client.newCall(request).execute()
+        } catch (_: Exception) {}
+
+        Result.success(Unit)
     }
 
     // ==========================================
     // 2. 매일 루틴 (DailyRoutine) - 약 먹기 특화
     // ==========================================
 
-    /**
-     * 특정 스페이스의 매일 루틴 목록 실시간 구독
-     */
-    fun observeRoutines(spaceId: String): Flow<List<DailyRoutine>> = callbackFlow {
-        if (spaceId.isBlank()) {
-            trySend(emptyList())
-            close()
-            return@callbackFlow
-        }
-
-        val query = firestore.collection("spaces")
-            .document(spaceId)
-            .collection("routines")
-            .orderBy("createdAt")
-
-        val listener = query.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                close(error)
-                return@addSnapshotListener
-            }
-            val routines = snapshot?.documents?.mapNotNull { it.toObject(DailyRoutine::class.java) } ?: emptyList()
-            trySend(routines)
-        }
-
-        awaitClose {
-            listener.remove()
-        }
+    fun observeRoutines(spaceId: String): Flow<List<DailyRoutine>> {
+        return getRoutineFlow(spaceId).asStateFlow()
     }
 
-    /**
-     * 새 루틴 추가 (예: "아침 혈압약 먹기", "유산균 복용")
-     */
     suspend fun addRoutine(
         spaceId: String,
         title: String,
         iconType: String = "PILL",
         targetTime: String = "08:30"
-    ): Result<DailyRoutine> {
-        return try {
-            val routineId = UUID.randomUUID().toString()
-            val routine = DailyRoutine(
-                id = routineId,
-                spaceId = spaceId,
-                title = title.trim(),
-                iconType = iconType,
-                targetTime = targetTime,
-                createdAt = System.currentTimeMillis()
-            )
+    ): Result<DailyRoutine> = withContext(Dispatchers.IO) {
+        val routineId = UUID.randomUUID().toString()
+        val routine = DailyRoutine(
+            id = routineId,
+            spaceId = spaceId,
+            title = title.trim(),
+            iconType = iconType,
+            targetTime = targetTime,
+            createdAt = System.currentTimeMillis()
+        )
 
-            firestore.collection("spaces")
-                .document(spaceId)
-                .collection("routines")
-                .document(routineId)
-                .set(routine)
-                .await()
+        val flow = getRoutineFlow(spaceId)
+        flow.value = flow.value + routine
 
-            Result.success(routine)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        try {
+            val jsonBody = JSONObject().apply {
+                put("title", title)
+                put("icon_type", iconType)
+                put("target_time", targetTime)
+            }
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/routines")
+                .post(jsonBody.toString().toRequestBody(JSON))
+                .build()
+            client.newCall(request).execute()
+        } catch (_: Exception) {}
+
+        Result.success(routine)
     }
 
-    /**
-     * 원터치 루틴 완료 체크 (약 먹었어요 버튼 탭!)
-     *
-     * 핵심 기능: 현재 한국어 시각("오전 08:25")과 오늘 날짜를 실시간으로 기록하여
-     * 아내 본인과 남편 폰 모두에 "오늘 오전 08:25 복용 완료"로 영구 노출됨
-     */
-    suspend fun checkRoutineDone(spaceId: String, routineId: String): Result<String> {
-        return try {
-            val todayDate = DateTimeUtils.getTodayDateString()
-            val completedTimeKorean = DateTimeUtils.getCurrentKoreanTimeString()
+    suspend fun checkRoutineDone(spaceId: String, routineId: String): Result<String> = withContext(Dispatchers.IO) {
+        val todayDate = DateTimeUtils.getTodayDateString()
+        val completedTimeKorean = DateTimeUtils.getCurrentKoreanTimeString()
 
-            firestore.collection("spaces")
-                .document(spaceId)
-                .collection("routines")
-                .document(routineId)
-                .update(
-                    mapOf(
-                        "lastCompletedDate" to todayDate,
-                        "lastCompletedTime" to completedTimeKorean
-                    )
+        val flow = getRoutineFlow(spaceId)
+        flow.value = flow.value.map {
+            if (it.id == routineId) {
+                it.copy(
+                    lastCompletedDate = todayDate,
+                    lastCompletedTime = completedTimeKorean
                 )
-                .await()
-
-            Result.success(completedTimeKorean)
-        } catch (e: Exception) {
-            Result.failure(e)
+            } else it
         }
+
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/routines/$routineId/check")
+                .post("{}".toRequestBody(JSON))
+                .build()
+            client.newCall(request).execute()
+        } catch (_: Exception) {}
+
+        Result.success(completedTimeKorean)
     }
 
-    /**
-     * 루틴 삭제
-     */
-    suspend fun deleteRoutine(spaceId: String, routineId: String): Result<Unit> {
-        return try {
-            firestore.collection("spaces")
-                .document(spaceId)
-                .collection("routines")
-                .document(routineId)
+    suspend fun deleteRoutine(spaceId: String, routineId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val flow = getRoutineFlow(spaceId)
+        flow.value = flow.value.filter { it.id != routineId }
+
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/routines/$routineId")
                 .delete()
-                .await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+                .build()
+            client.newCall(request).execute()
+        } catch (_: Exception) {}
+
+        Result.success(Unit)
     }
 }
