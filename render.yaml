@@ -1,7 +1,8 @@
 services:
   - type: web
-    name: familyspace-todo-api
+    name: todak-todak
     runtime: python
+    plan: free
     buildCommand: pip install -r server/requirements.txt
     startCommand: gunicorn --chdir server app:app
     envVars:
