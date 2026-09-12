@@ -91,8 +91,28 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
 
             if (response.isSuccessful) {
                 val resJson = JSONObject(resBody)
-                val inviteCode = resJson.optString("invite_code", defaultCode)
-                return@withContext Result.success(Pair(localSpace, inviteCode))
+                val inviteCode = resJson.optString("invite_code", defaultCode).ifBlank { defaultCode }
+                // ⚠️ 서버가 발급한 space_id로 교체 (서버 초대 코드는 서버 ID에 귀속됨)
+                // 로컬에서 미리 만든 UUID를 그대로 쓰면, 공유된 코드가 다른 방을 가리켜
+                // 아내 쪽에서 항상 "유효하지 않거나 이미 사용 완료된 코드"가 뜬다.
+                val spaceJson = resJson.optJSONObject("space")
+                val serverSpace = if (spaceJson != null) {
+                    Space(
+                        id = spaceJson.optString("id", spaceId).ifBlank { spaceId },
+                        title = spaceJson.optString("title", trimmedTitle.ifBlank { "우리 공간" }),
+                        themeColor = spaceJson.optString("theme_color", themeColor.name),
+                        memberUids = listOf(myUid),
+                        createdBy = myUid,
+                        createdAt = System.currentTimeMillis()
+                    )
+                } else {
+                    localSpace
+                }
+                spacesStateFlow.value = spacesStateFlow.value
+                    .filterNot { it.id == spaceId || it.id == serverSpace.id }
+                    .toMutableList().apply { add(0, serverSpace) }
+                dataStore?.setActiveSpaceId(serverSpace.id)
+                return@withContext Result.success(Pair(serverSpace, inviteCode))
             }
 
             // 서버 거부 (같은 이름 중복 등) → 로컬 추가 롤백 후 실패 반환
