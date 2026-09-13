@@ -1105,8 +1105,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 9
-CURRENT_APP_VERSION_NAME = "1.3.5"
+CURRENT_APP_VERSION_CODE = 10
+CURRENT_APP_VERSION_NAME = "1.3.6"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1117,7 +1117,7 @@ def get_app_version():
         # 고정 자산명: 구버전 앱(app-debug.apk 링크 내장) 호환을 위해 폴백 URL도 함께 제공
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk",
-        "changelog": "🎉 v1.3.5\n- ⏰ 특정 시각 소리 알람 신규 탑재 (모닝콜/약 챙기기 알람 소리 & 끄기)\n- 🎙️ 구글 공식 고성능 신경망 음성인식 다이얼로그 연동 (인식률 95%+)\n- 할 일 카드에 알람 시각 뱃지(⏰ 오전 10:00 등) 표시"
+        "changelog": "🎉 v1.3.6\n- ⏰ 특정 시각 소리 알람 신규 탑재 (모닝콜/약 챙기기 소리 & 끄기 화면)\n- 🎙️ 구글 공식 고성능 신경망 음성인식 다이얼로그 연동 (인식률 95%+)\n- 📲 자녀 아이폰(iOS) 전용 모바일 PWA 웹앱 정식 오픈\n- 할 일 카드에 알람 시각 뱃지(⏰ 오전 10:00 등) 표시"
     }), 200
 
 
