@@ -87,12 +87,15 @@ class DataStoreManager(val context: Context) {
     val userNicknameFlow: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_USER_NICKNAME] ?: "나"
     }
+    val myNicknameFlow: Flow<String> = userNicknameFlow
 
     suspend fun setUserNickname(nickname: String) {
         context.dataStore.edit { prefs ->
             prefs[KEY_USER_NICKNAME] = nickname
         }
     }
+
+    suspend fun setMyNickname(nickname: String) = setUserNickname(nickname)
 
     /**
      * 상대방 애칭 스트림 (기본값: "")
