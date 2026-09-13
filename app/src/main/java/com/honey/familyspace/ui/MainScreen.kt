@@ -991,7 +991,7 @@ fun MainScreen(
                     val shareText =
                         "🏡 토닥토닥 '${roomTitle}'에 초대합니다 🌸\n\n" +
                         "📝 4자리 초대 코드: ${generatedCode}\n" +
-                        "(10분 안에 입력해 주세요)\n\n" +
+                        "(30분 안에 입력해 주세요)\n\n" +
                         "만약 아직 앱이 없다면 아래 링크를 눌러 먼저 설치해 주세요 ↓\n" +
                         "https://todak-todak.onrender.com/download/app-latest.apk\n\n" +
                         "설치 후 토닥토닥 앱 상단의 [초대 코드 입력(열쇠 아이콘)]에\n'${generatedCode}'를 입력하면 바로 연결돼요!"

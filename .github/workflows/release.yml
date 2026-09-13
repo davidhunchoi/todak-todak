@@ -34,17 +34,35 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK (Build Tools 34.0.0)
-        uses: android-actions/setup-android@v3
-        with:
-          android-version: '34.0.0'
-          accept-license: 'true'
+      - name: Set up Android SDK
+        run: |
+          # ubuntu-latest 이미지에는 Android SDK가 이미 포함되어 있음
+          # 추가 Build Tools 34.0.0이 없을 경우 sdkmanager로 설치
+          echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
+          echo "Android SDK Location: $ANDROID_HOME"
+          ls "$ANDROID_HOME/build-tools/" || true
+          if [ ! -d "$ANDROID_HOME/build-tools/34.0.0" ]; then
+            echo "Installing Build Tools 34.0.0 via sdkmanager..."
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+              "platforms;android-34" \
+              "build-tools;34.0.0" \
+              --sdk_root="$ANDROID_HOME" || \
+            yes | "$ANDROID_HOME/tools/bin/sdkmanager" \
+              "platforms;android-34" \
+              "build-tools;34.0.0" \
+              --sdk_root="$ANDROID_HOME" || true
+          else
+            echo "Build Tools 34.0.0 already installed."
+          fi
+          echo "PATH=${ANDROID_HOME}/build-tools/34.0.0:${PATH}" >> $GITHUB_ENV
 
       - name: Enable Gradle cache
         uses: actions/cache@v4
         with:
           path: ~/.gradle/caches
           key: gradle-${{ hashFiles('**/*.gradle.kts', 'gradle.lockfile') }}
+          restore-keys: |
+            gradle-
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
@@ -66,6 +84,8 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          # Gradle JVM 메모리 증가 (OOM 방지)
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
           if [ -f "$RUNNER_TEMP/release.keystore" ]; then
@@ -81,7 +101,10 @@ jobs:
         run: |
           echo "### ❌ Gradle Build Error Log" >> $GITHUB_STEP_SUMMARY
           echo '```text' >> $GITHUB_STEP_SUMMARY
-          tail -n 120 build.log >> $GITHUB_STEP_SUMMARY || true
+          # FAILURE/error/Exception/Caused by 위주로 300줄 출력 (원인 파악 강화)
+          grep -n "FAILURE\|error:\|Caused by:\|> Task\|Exception\|BUILD FAILED\|BUILD SUCCESSFUL" build.log | tail -n 100 >> $GITHUB_STEP_SUMMARY || true
+          echo '---' >> $GITHUB_STEP_SUMMARY
+          tail -n 300 build.log >> $GITHUB_STEP_SUMMARY || echo "(build.log 없음)" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Verify artifact
