@@ -163,6 +163,74 @@ def _execute_statements(db, sql):
             print(f"[init_schema] 문장 실패 (무시): {e} :: {stmt[:80]}", flush=True)
 
 
+def migrate_schema_columns(db):
+    """기존 DB 테이블에 누락된 컬럼을 안전하게 자동 추가 (ALTER TABLE ... ADD COLUMN).
+    CREATE TABLE IF NOT EXISTS 는 기존 테이블이 있으면 새 컬럼을 추가하지 못하므로,
+    여기서 컬럼 존재 여부를 PRAGMA table_info 로 검사하여 보완한다.
+    """
+    migrations = [
+        # (테이블, 컬럼명, ALTER 구문)
+        ("spaces", "theme_color", "ALTER TABLE spaces ADD COLUMN theme_color TEXT NOT NULL DEFAULT 'CORAL'"),
+        ("spaces", "created_by", "ALTER TABLE spaces ADD COLUMN created_by TEXT"),
+        ("spaces", "created_at", "ALTER TABLE spaces ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0"),
+        ("space_members", "joined_at", "ALTER TABLE space_members ADD COLUMN joined_at INTEGER NOT NULL DEFAULT 0"),
+        ("invites", "created_by", "ALTER TABLE invites ADD COLUMN created_by TEXT"),
+        ("invites", "expires_at", "ALTER TABLE invites ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0"),
+        ("tasks", "created_by", "ALTER TABLE tasks ADD COLUMN created_by TEXT"),
+        ("tasks", "due_date", "ALTER TABLE tasks ADD COLUMN due_date TEXT"),
+        ("routines", "icon_type", "ALTER TABLE routines ADD COLUMN icon_type TEXT NOT NULL DEFAULT 'PILL'"),
+        ("routines", "target_time", "ALTER TABLE routines ADD COLUMN target_time TEXT DEFAULT '08:30'"),
+        ("routines", "last_completed_date", "ALTER TABLE routines ADD COLUMN last_completed_date TEXT DEFAULT ''"),
+        ("routines", "last_completed_time", "ALTER TABLE routines ADD COLUMN last_completed_time TEXT DEFAULT ''"),
+    ]
+
+    extra_tables = [
+        """CREATE TABLE IF NOT EXISTS routine_checks (
+            routine_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            completed_date TEXT NOT NULL,
+            completed_time TEXT NOT NULL,
+            checked_at INTEGER NOT NULL,
+            PRIMARY KEY (routine_id, user_id),
+            FOREIGN KEY (routine_id) REFERENCES routines(id) ON DELETE CASCADE
+        )""",
+        """CREATE TABLE IF NOT EXISTS space_delete_requests (
+            space_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            requested_at INTEGER NOT NULL,
+            PRIMARY KEY (space_id, user_id)
+        )"""
+    ]
+    for tbl_sql in extra_tables:
+        try:
+            _q(db, tbl_sql)
+        except Exception as e:
+            print(f"[migration table] {e}", flush=True)
+
+    results = {}
+    for table_name, col_name, alter_stmt in migrations:
+        try:
+            info_res = _q(db, f"PRAGMA table_info({table_name})")
+            existing_cols = []
+            for row in _rows(info_res):
+                cname = _row_get(row, "name", 1)
+                if cname:
+                    existing_cols.append(str(cname).lower())
+
+            if col_name.lower() not in existing_cols:
+                print(f"[migration] {table_name} 에 컬럼 {col_name} 추가 중...", flush=True)
+                _q(db, alter_stmt)
+                results[f"{table_name}.{col_name}"] = "added"
+            else:
+                results[f"{table_name}.{col_name}"] = "already_exists"
+        except Exception as e:
+            results[f"{table_name}.{col_name}"] = f"error: {e}"
+            print(f"[migration error] {table_name}.{col_name}: {e}", flush=True)
+
+    _db_commit(db)
+    return results
+
+
 def init_schema():
     """
     서버 시작 시 전체 스키마 적용 (모든 CREATE TABLE IF NOT EXISTS)
@@ -177,6 +245,7 @@ def init_schema():
     db = get_db()
     try:
         _execute_statements(db, schema_sql)
+        migrate_schema_columns(db)
         if hasattr(db, "commit"):
             try:
                 db.commit()
@@ -248,6 +317,65 @@ def _row_get(row, key, index):
         return None
 
 
+
+def _db_close(db):
+    try:
+        if hasattr(db, "close"):
+            db.close()
+    except Exception:
+        pass
+
+
+def _db_commit(db):
+    try:
+        commit = getattr(db, "commit", None)
+        if callable(commit):
+            commit()
+    except Exception:
+        pass
+
+
+def _rows(res):
+    """libSQL(Turso) / sqlite3 실행 결과 → 행 리스트로 정규화"""
+    if res is None:
+        return []
+    if hasattr(res, "fetchall"):
+        try:
+            return res.fetchall() or []
+        except Exception:
+            return []
+    return getattr(res, "rows", []) or []
+
+
+def _one(res):
+    rows = _rows(res)
+    return rows[0] if rows else None
+
+
+def _cell(res, index=0):
+    row = _one(res)
+    if row is None:
+        return None
+    try:
+        return row[index]
+    except Exception:
+        return None
+
+
+def _row_get(row, key, index):
+    """libSQL(dict/tuple) / sqlite3.Row 행에서 값 추출"""
+    try:
+        v = row[key]
+        if v is not None:
+            return v
+    except Exception:
+        pass
+    try:
+        return row[index]
+    except Exception:
+        return None
+
+
 try:
     init_schema()
 except Exception as _init_err:
@@ -259,28 +387,16 @@ except Exception as _init_err:
 
 @app.before_request
 def _ensure_schema_once():
-    """첫 요청 시 테이블이 없으면 스키마 재적용 (init 실패 + 기존 DB 누락 테이블 대응)
-
-    ⚠️ libsql-client 0.3.x 의 execute() 는 INSERT 등 쓰기 쿼리에 대해
-    params 를 반드시 리스트(list)로 받아야 함. 튜플 전달 시
-    libsql-client 패키지 내부에서 TypeError → Flask 500 → 앱에서
-    "방 만들기 실패" 로 보이는 원인이 됨. 이 함수는 읽기 전용이라 안전.
-    """
+    """첫 요청 시 스키마 및 누락 컬럼 자동 마이그레이션 보장"""
     if getattr(app, "_schema_ready", False):
         return
     db = get_db()
     try:
-        probe = None
-        try:
-            probe = _q(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='spaces'")
-        except Exception:
-            probe = None
-        if _one(probe):
-            app._schema_ready = True
-            return
         schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
-        with open(schema_path, "r", encoding="utf-8") as f:
-            _execute_statements(db, f.read())
+        if os.path.exists(schema_path):
+            with open(schema_path, "r", encoding="utf-8") as f:
+                _execute_statements(db, f.read())
+        migrate_schema_columns(db)
         _db_commit(db)
         app._schema_ready = True
     except Exception as e:
@@ -330,36 +446,55 @@ def health_check():
         "status": "online",
         "service": "토닥토닥 (TodakTodak) API",
         "time": datetime.now(KST).isoformat()
-        }), 200
+    }), 200
 
 
 @app.route("/debug/schema", methods=["GET"])
 def debug_schema():
-    """디버깅용: Turso DB의 테이블 스키마 확인 (임시 엔드포인트)"""
+    """디버깅용: Turso DB 스키마 및 마이그레이션 확인 (임시 엔드포인트)"""
     db = get_db()
     result = {}
     try:
-        # Check if tables exist using INFORMATION_SCHEMA (libsql/Turso standard)
+        try:
+            result["migration_results"] = migrate_schema_columns(db)
+        except Exception as e:
+            result["migration_error"] = str(e)
+
         try:
             probe = _q(db, "SELECT name FROM sqlite_master WHERE type='table'")
             tables = [r[0] if not hasattr(r, 'keys') else r['name'] for r in _rows(probe)]
             result["sqlite_master_tables"] = tables
         except Exception as e:
             result["sqlite_master_error"] = str(e)
-        
-        # Try CREATE TABLE test
+
+        table_columns = {}
+        for tbl in ["spaces", "space_members", "invites", "routines"]:
+            try:
+                res = _q(db, f"PRAGMA table_info({tbl})")
+                cols = [_row_get(r, "name", 1) for r in _rows(res)]
+                table_columns[tbl] = cols
+            except Exception as e:
+                table_columns[tbl] = f"error: {e}"
+        result["table_columns"] = table_columns
+
         try:
-            _q(db, "CREATE TABLE IF NOT EXISTS test_table (id TEXT)")
-            result["create_test"] = "success"
+            import uuid as _uuid
+            _test_id = f"debug-{_uuid.uuid4()}"
+            _q(db,
+                "INSERT INTO spaces (id, title, theme_color, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+                [_test_id, "디버그", "CORAL", "debug-user", 123]
+            )
+            result["insert_spaces"] = "success"
         except Exception as e:
-            result["create_test_error"] = str(e)
-        
-        # Try INSERT
+            result["insert_spaces_error"] = str(e)
+
         try:
-            _q(db, "INSERT INTO test_table (id) VALUES (?)", ["test-id-1"])
-            result["insert_test"] = "success"
+            res = _q(db, "SELECT * FROM spaces LIMIT 5")
+            rows = _rows(res)
+            result["select_spaces_count"] = len(rows)
+            result["select_spaces_ok"] = True
         except Exception as e:
-            result["insert_test_error"] = str(e)
+            result["select_spaces_error"] = str(e)
     finally:
         _db_close(db)
     return jsonify(result), 200
@@ -419,6 +554,15 @@ def create_space():
             "invite_code": code,
             "expires_in_minutes": 10
         }), 201
+    except Exception as e:
+        import traceback as _tb
+        _trace = _tb.format_exc()
+        print(f"[create_space ERROR] {e}\n{_trace}", flush=True)
+        return jsonify({
+            "error": f"방 만들기 실패: {e}",
+            "detail": str(e),
+            "traceback": _trace
+        }), 500
     finally:
         _db_close(db)
 
