@@ -275,7 +275,23 @@ class FamilySpaceWidget : GlanceAppWidget() {
 }
 
 /**
+ * 위젯 내 [🔄] 새로고침 버튼 클릭 시 백그라운드 동기화 콜백
+ */
+class RefreshWidgetActionCallback : ActionCallback {
+    override suspend fun onAction(
+        context: Context,
+        glanceId: GlanceId,
+        parameters: ActionParameters
+    ) {
+        val dataStore = DataStoreManager(context)
+        val activeSpaceId = dataStore.activeSpaceIdFlow.firstOrNull() ?: ""
+        if (activeSpaceId.isNotBlank()) {
+            val taskRepo = TaskRepository(dataStore)
+            taskRepo.syncTasksFromServer(activeSpaceId)
+            taskRepo.syncRoutinesFromServer(activeSpaceId)
+        }
         FamilySpaceWidget().update(context, glanceId)
         OngoingNotificationManager.updateOngoingNotification(context)
     }
 }
+
