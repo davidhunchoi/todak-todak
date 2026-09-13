@@ -90,7 +90,7 @@ class TaskAlarmActivity : ComponentActivity() {
                             try {
                                 val taskRepo = TaskRepository(DataStoreManager(this@TaskAlarmActivity))
                                 taskRepo.toggleTask(spaceId, taskId, isCurrentCompleted = false)
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {}
                             stopAndFinish(taskId)
                         }
                     } else {
@@ -150,7 +150,7 @@ class TaskAlarmActivity : ComponentActivity() {
                 @Suppress("DEPRECATION")
                 vibrator?.vibrate(pattern, 0)
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {}
     }
 
     private fun stopAndFinish(taskId: String) {
@@ -159,7 +159,7 @@ class TaskAlarmActivity : ComponentActivity() {
             vibrator?.cancel()
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             nm?.cancel(taskId.hashCode())
-        } catch (_: Exception) {}
+        } catch (e: Exception) {}
         finish()
     }
 

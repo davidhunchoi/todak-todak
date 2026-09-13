@@ -42,7 +42,7 @@ class TaskAlarmReceiver : BroadcastReceiver() {
         }
         try {
             context.startActivity(alarmIntent)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {}
 
         // 2. 잠금화면 및 상단바 헤드업 긴급 알람 알림 발송
         showAlarmNotification(context, taskId, taskTitle, alarmIntent)
