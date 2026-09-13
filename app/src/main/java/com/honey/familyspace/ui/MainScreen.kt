@@ -23,12 +23,16 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import com.honey.familyspace.widget.FamilySpaceWidget
 import androidx.compose.material3.AlertDialog
@@ -39,6 +43,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -96,16 +101,22 @@ fun MainScreen(
     val mySpaces by spaceRepo.observeMySpaces().collectAsState(initial = emptyList())
     val activeSpaceId by dataStore.activeSpaceIdFlow.collectAsState(initial = null)
 
-    val currentSpace = mySpaces.find { it.id == activeSpaceId } ?: mySpaces.firstOrNull()
-    val currentTheme = currentSpace?.getTheme() ?: ThemeColor.CORAL
+    // 전체보기 모드: 참여 방이 2개 이상이고 "ALL"이 선택되었을 때
+    val isAllMode = (activeSpaceId == "ALL") && mySpaces.size > 1
+    val currentSpace = if (isAllMode) mySpaces.firstOrNull() else (mySpaces.find { it.id == activeSpaceId } ?: mySpaces.firstOrNull())
+    val currentTheme = if (isAllMode) ThemeColor.LAVENDER else (currentSpace?.getTheme() ?: ThemeColor.CORAL)
 
-    val tasks by if (currentSpace != null) {
+    val tasks by if (isAllMode) {
+        taskRepo.observeAllTasks(mySpaces.map { it.id }).collectAsState(initial = emptyList())
+    } else if (currentSpace != null) {
         taskRepo.observeTasks(currentSpace.id).collectAsState(initial = emptyList())
     } else {
         remember { mutableStateOf(emptyList<Task>()) }
     }
 
-    val routines by if (currentSpace != null) {
+    val routines by if (isAllMode) {
+        taskRepo.observeAllRoutines(mySpaces.map { it.id }).collectAsState(initial = emptyList())
+    } else if (currentSpace != null) {
         taskRepo.observeRoutines(currentSpace.id).collectAsState(initial = emptyList())
     } else {
         remember { mutableStateOf(emptyList<DailyRoutine>()) }
@@ -114,6 +125,7 @@ fun MainScreen(
     val todayDate = DateTimeUtils.getTodayDateString()
     var showAddSheet by remember { mutableStateOf(false) }
     var showInviteDialog by remember { mutableStateOf(false) }
+    var showMemberLimitDialog by remember { mutableStateOf(false) }
     var showJoinDialog by remember { mutableStateOf(false) }
     var joinDialogCreating by remember { mutableStateOf(false) }
     var joinError by remember { mutableStateOf<String?>(null) }
@@ -122,13 +134,29 @@ fun MainScreen(
     var updateInfo by remember { mutableStateOf<AppUpdateManager.UpdateInfo?>(null) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
 
+    // 롱클릭 액션 및 삭제 확인 상태 (무단 삭제 방지)
+    var actionTargetTask by remember { mutableStateOf<Task?>(null) }
+    var actionTargetRoutine by remember { mutableStateOf<DailyRoutine?>(null) }
+    var taskToDelete by remember { mutableStateOf<Task?>(null) }
+    var routineToDelete by remember { mutableStateOf<DailyRoutine?>(null) }
+    var editingRoutine by remember { mutableStateOf<DailyRoutine?>(null) }
+    var routineNewTitle by remember { mutableStateOf("") }
+
+    // 방 이름 변경 다이얼로그 상태
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameTargetSpace by remember { mutableStateOf<Space?>(null) }
+    var renameInputText by remember { mutableStateOf("") }
+
+    // 화면 새로고침 상태
+    var isRefreshing by remember { mutableStateOf(false) }
+
     // 현재 앱 버전 (실제 설치된 APK 버전 정보 실시간 조회)
     val appVersion = remember {
         try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            "v${pInfo.versionName ?: "1.3.4"}"
+            "v${pInfo.versionName ?: "1.3.7"}"
         } catch (e: Exception) {
-            "v1.3.4"
+            "v1.3.7"
         }
     }
 
@@ -144,25 +172,51 @@ fun MainScreen(
     var showDeleteConsentDialog by remember { mutableStateOf(false) }
     var consentTargetSpace by remember { mutableStateOf<Space?>(null) }
 
+    // 수동 새로고침 함수 (쓸어내리기 및 상단 새로고침 버튼용)
+    val triggerRefresh: () -> Unit = {
+        if (!isRefreshing) {
+            isRefreshing = true
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            scope.launch {
+                try {
+                    spaceRepo.syncSpacesFromServer()
+                    mySpaces.forEach { s ->
+                        taskRepo.syncTasksFromServer(s.id)
+                        taskRepo.syncRoutinesFromServer(s.id)
+                    }
+                    Toast.makeText(context, "새로고침 완료 💖", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    // 오류 무시
+                } finally {
+                    delay(500)
+                    isRefreshing = false
+                }
+            }
+        }
+    }
+
     // 앱 실행 시 백엔드 서버에 새 버전(업데이트) 있는지 확인 및 내 방 목록 동기화
-    // - 자동 다운로드는 하지 않음: 업데이트 팝업에서 [지금 업데이트]를 눌렀을 때만 다운로드
-    //   (이전처럼 실행 직후 토스트+자동 다운로드는 "삭제하려는데 업그레이드?" 혼란 + 다운로드/설치 충돌 원인이었음)
     LaunchedEffect(Unit) {
         val info = AppUpdateManager.checkForUpdate(context)
         if (info != null && info.hasUpdate) {
             updateInfo = info
         }
         spaceRepo.syncSpacesFromServer()
-
-        // 리마인더 알람 스케줄 확인 및 등록
         ReminderScheduler.scheduleReminder(context, reminderInterval)
     }
 
-    // 현재 스페이스의 매일 루틴 동기화 (화면 진입/스페이스 변경 시)
-    // 상대방이 체크한 루틴 상태를 서버에서 가져와 반영
-    LaunchedEffect(currentSpace?.id) {
-        currentSpace?.let { space ->
-            taskRepo.syncRoutinesFromServer(space.id)
+    // 🌟 3초 주기 실시간 자동 동기화 루프 (상대방 작성/체크 즉각 반영)
+    LaunchedEffect(mySpaces) {
+        while (true) {
+            try {
+                mySpaces.forEach { space ->
+                    taskRepo.syncTasksFromServer(space.id)
+                    taskRepo.syncRoutinesFromServer(space.id)
+                }
+            } catch (e: Exception) {
+                // 네트워크 일시 불안정 시 다음 주기에 재시도
+            }
+            delay(3000)
         }
     }
 
@@ -215,7 +269,26 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(horizontal = 20.dp, vertical = 16.dp)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures { _, dragAmount ->
+                        // 화면을 위에서 아래로 50픽셀 이상 쓸어내리면 즉시 새로고침
+                        if (dragAmount > 50) {
+                            triggerRefresh()
+                        }
+                    }
+                }
         ) {
+            // 새로고침 진행 표시줄
+            if (isRefreshing) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp),
+                    color = Color(currentTheme.accentHex)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             // 1. 적응형 상단 헤더 (방이 1개일 땐 단일 헤더, 2개 이상일 땐 알약 탭)
             if (mySpaces.size <= 1) {
                 Row(
@@ -233,7 +306,14 @@ fun MainScreen(
                             fontWeight = FontWeight.ExtraBold,
                             color = Color(currentTheme.textColor),
                             modifier = Modifier.combinedClickable(
-                                onClick = {},
+                                onClick = {
+                                    // 방 이름 터치 시 방 이름 변경 팝업
+                                    currentSpace?.let { space ->
+                                        renameTargetSpace = space
+                                        renameInputText = space.title
+                                        showRenameDialog = true
+                                    }
+                                },
                                 onLongClick = {
                                     // 방 이름 길게 누르기 → 방 삭제 요청 (상대방 동의 필요)
                                     currentSpace?.let { space ->
@@ -259,7 +339,12 @@ fun MainScreen(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // 1. 초대 코드 입력 버튼 (상시 노출)
+                        // 0. 즉시 새로고침 버튼 (원터치 갱신)
+                        IconButton(onClick = triggerRefresh) {
+                            Icon(Icons.Default.Refresh, contentDescription = "새로고침", tint = Color(currentTheme.accentHex))
+                        }
+
+                        // 1. 초대 코드 입력 버튼
                         IconButton(onClick = {
                             joinDialogCreating = false
                             joinError = null
@@ -268,17 +353,21 @@ fun MainScreen(
                             Icon(Icons.Default.Key, contentDescription = "초대 코드 입력", tint = Color(currentTheme.accentHex))
                         }
 
-                        // 2. 방 초대하기 버튼
+                        // 2. 방 초대하기 버튼 (2명 한정 원칙 검증)
                         if (currentSpace != null) {
                             IconButton(onClick = {
-                                scope.launch {
-                                    spaceRepo.getOrRefreshInviteCode(currentSpace.id).onSuccess { code ->
-                                        generatedCode = code
-                                        showInviteDialog = true
+                                if (currentSpace.memberCount >= 2) {
+                                    showMemberLimitDialog = true
+                                } else {
+                                    scope.launch {
+                                        spaceRepo.getOrRefreshInviteCode(currentSpace.id).onSuccess { code ->
+                                            generatedCode = code
+                                            showInviteDialog = true
+                                        }
                                     }
                                 }
                             }) {
-                                Icon(Icons.Default.PersonAdd, contentDescription = "가족 초대하기", tint = Color(currentTheme.accentHex))
+                                Icon(Icons.Default.PersonAdd, contentDescription = "초대하기", tint = Color(currentTheme.accentHex))
                             }
                         }
 
@@ -289,14 +378,37 @@ fun MainScreen(
                     }
                 }
             } else {
-                // 다중 스페이스 알약 탭
+                // 다중 스페이스 알약 탭 (맨 앞에 [🌈 전체보기] 탭 제공)
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    // 🌈 전체보기 탭 (방 2개 이상일 때)
+                    item {
+                        val isSelected = isAllMode
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    color = if (isSelected) Color(0xFF673AB7) else Color.White,
+                                    shape = RoundedCornerShape(20.dp)
+                                )
+                                .clickable {
+                                    scope.launch { dataStore.setActiveSpaceId("ALL") }
+                                }
+                                .padding(horizontal = 18.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = "🌈 전체보기",
+                                fontSize = 15.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) Color.White else Color(0xFF666666)
+                            )
+                        }
+                    }
+
                     items(mySpaces) { space ->
-                        val isSelected = space.id == currentSpace?.id
+                        val isSelected = !isAllMode && space.id == currentSpace?.id
                         val spaceTheme = space.getTheme()
                         Box(
                             modifier = Modifier
@@ -325,6 +437,13 @@ fun MainScreen(
                         }
                     }
 
+                    // 상단 원터치 새로고침 버튼
+                    item {
+                        IconButton(onClick = triggerRefresh) {
+                            Icon(Icons.Default.Refresh, contentDescription = "새로고침", tint = Color(currentTheme.accentHex))
+                        }
+                    }
+
                     item {
                         IconButton(onClick = {
                             joinDialogCreating = false
@@ -338,10 +457,14 @@ fun MainScreen(
                     item {
                         IconButton(onClick = {
                             currentSpace?.let { space ->
-                                scope.launch {
-                                    spaceRepo.getOrRefreshInviteCode(space.id).onSuccess { code ->
-                                        generatedCode = code
-                                        showInviteDialog = true
+                                if (space.memberCount >= 2) {
+                                    showMemberLimitDialog = true
+                                } else {
+                                    scope.launch {
+                                        spaceRepo.getOrRefreshInviteCode(space.id).onSuccess { code ->
+                                            generatedCode = code
+                                            showInviteDialog = true
+                                        }
                                     }
                                 }
                             }
@@ -449,48 +572,44 @@ fun MainScreen(
                 ) {
                     // 매일 반복 루틴 카드
                     items(routines) { routine ->
+                        val spaceTitle = if (isAllMode) mySpaces.find { it.id == routine.spaceId }?.title else null
                         RoutineCardItem(
                             routine = routine,
                             todayDate = todayDate,
                             theme = currentTheme,
+                            spaceBadge = spaceTitle,
                             onCheck = {
                                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                 scope.launch {
-                                    currentSpace?.let { space ->
-                                        taskRepo.checkRoutineDone(space.id, routine.id)
-                                        taskRepo.syncRoutinesFromServer(space.id)
-                                    }
+                                    taskRepo.checkRoutineDone(routine.spaceId, routine.id)
+                                    taskRepo.syncRoutinesFromServer(routine.spaceId)
                                     OngoingNotificationManager.updateOngoingNotification(context)
                                 }
                             },
                             onLongClick = {
-                                scope.launch {
-                                    currentSpace?.let { space ->
-                                        taskRepo.deleteRoutine(space.id, routine.id)
-                                        OngoingNotificationManager.updateOngoingNotification(context)
-                                        Toast.makeText(context, "'${routine.title}' 루틴을 삭제했어요", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
+                                // 롱클릭 시 바로 삭제하지 않고 [수정/삭제] 선택 다이얼로그 표시
+                                actionTargetRoutine = routine
                             }
                         )
                     }
 
                     items(tasks) { task ->
+                        val spaceTitle = if (isAllMode) mySpaces.find { it.id == task.spaceId }?.title else null
                         TaskCardItem(
                             task = task,
                             todayDate = todayDate,
                             theme = currentTheme,
+                            spaceBadge = spaceTitle,
                             onToggle = {
                                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                 scope.launch {
-                                    currentSpace?.let { space ->
-                                        taskRepo.toggleTask(space.id, task.id, task.isCompleted)
-                                    }
+                                    taskRepo.toggleTask(task.spaceId, task.id, task.isCompleted)
                                     OngoingNotificationManager.updateOngoingNotification(context)
                                 }
                             },
                             onLongClick = {
-                                editingTask = task
+                                // 롱클릭 시 [수정/삭제] 선택 다이얼로그 표시
+                                actionTargetTask = task
                             }
                         )
                     }
@@ -510,20 +629,40 @@ fun MainScreen(
 
     // 할 일 수정 및 삭제 바텀시트
     editingTask?.let { taskToEdit ->
-        if (currentSpace != null) {
-            EditTaskBottomSheet(
-                task = taskToEdit,
+        EditTaskBottomSheet(
+            task = taskToEdit,
+            theme = currentTheme,
+            onDismiss = { editingTask = null },
+            onUpdateTask = { newTitle, newDueDate, newAlarmTime, newHasAlarm ->
+                scope.launch {
+                    taskRepo.updateTask(taskToEdit.spaceId, taskToEdit.id, newTitle, newDueDate, newAlarmTime, newHasAlarm)
+                    OngoingNotificationManager.updateOngoingNotification(context)
+                }
+            },
+            onDeleteTask = {
+                // 바로 삭제하지 않고 삭제 확인 다이얼로그 팝업
+                taskToDelete = taskToEdit
+                editingTask = null
+            }
+        )
+    }
+
+    // 할 일 추가 바텀시트
+    if (showAddSheet) {
+        val targetSpaceId = if (isAllMode) (mySpaces.firstOrNull()?.id ?: "") else (currentSpace?.id ?: "")
+        if (targetSpaceId.isNotBlank()) {
+            AddTaskBottomSheet(
                 theme = currentTheme,
-                onDismiss = { editingTask = null },
-                onUpdateTask = { newTitle, newDueDate, newAlarmTime, newHasAlarm ->
+                onDismiss = { showAddSheet = false },
+                onAddTask = { title, dueDate, isDaily, alarmTime, hasAlarm ->
                     scope.launch {
-                        taskRepo.updateTask(currentSpace.id, taskToEdit.id, newTitle, newDueDate, newAlarmTime, newHasAlarm)
-                        OngoingNotificationManager.updateOngoingNotification(context)
-                    }
-                },
-                onDeleteTask = {
-                    scope.launch {
-                        taskRepo.deleteTask(currentSpace.id, taskToEdit.id)
+                        if (isDaily) {
+                            taskRepo.addRoutine(targetSpaceId, title)
+                            taskRepo.syncRoutinesFromServer(targetSpaceId)
+                        } else {
+                            taskRepo.addTask(targetSpaceId, title, dueDate, alarmTime, hasAlarm)
+                            taskRepo.syncTasksFromServer(targetSpaceId)
+                        }
                         OngoingNotificationManager.updateOngoingNotification(context)
                     }
                 }
@@ -531,32 +670,241 @@ fun MainScreen(
         }
     }
 
-    // 할 일 추가 바텀시트
-    if (showAddSheet && currentSpace != null) {
-        AddTaskBottomSheet(
-            theme = currentTheme,
-            onDismiss = { showAddSheet = false },
-            onAddTask = { title, dueDate, isDaily, alarmTime, hasAlarm ->
-                scope.launch {
-                    if (isDaily) {
-                        // 매일 반복 루틴으로 등록 (나와 상대 각각 체크)
-                        taskRepo.addRoutine(currentSpace.id, title)
-                        taskRepo.syncRoutinesFromServer(currentSpace.id)
-                    } else {
-                        taskRepo.addTask(currentSpace.id, title, dueDate, alarmTime, hasAlarm)
-                    }
-                    OngoingNotificationManager.updateOngoingNotification(context)
+    // 🌟 [할 일] 롱클릭 시 작업 선택 다이얼로그 (수정 vs 삭제)
+    actionTargetTask?.let { targetTask ->
+        AlertDialog(
+            onDismissRequest = { actionTargetTask = null },
+            title = { Text("선택: ${targetTask.title}", fontWeight = FontWeight.Bold) },
+            text = { Text("이 할 일에 대해 수행할 작업을 선택해 주세요.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        editingTask = targetTask
+                        actionTargetTask = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(currentTheme.accentHex))
+                ) {
+                    Text("✏️ 수정하기", color = Color.White)
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = {
+                        taskToDelete = targetTask
+                        actionTargetTask = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                ) {
+                    Text("🗑️ 삭제하기", color = Color.White)
                 }
             }
         )
     }
 
-    // 4자리 초대 코드 확인 다이얼로그
+    // 🌟 [루틴] 롱클릭 시 작업 선택 다이얼로그 (이름 수정 vs 삭제)
+    actionTargetRoutine?.let { targetRoutine ->
+        AlertDialog(
+            onDismissRequest = { actionTargetRoutine = null },
+            title = { Text("선택: ${targetRoutine.title}", fontWeight = FontWeight.Bold) },
+            text = { Text("이 매일 루틴에 대해 수행할 작업을 선택해 주세요.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        editingRoutine = targetRoutine
+                        routineNewTitle = targetRoutine.title
+                        actionTargetRoutine = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(currentTheme.accentHex))
+                ) {
+                    Text("✏️ 이름 수정하기", color = Color.White)
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = {
+                        routineToDelete = targetRoutine
+                        actionTargetRoutine = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                ) {
+                    Text("🗑️ 삭제하기", color = Color.White)
+                }
+            }
+        )
+    }
+
+    // 🌟 [할 일 삭제 확인 다이얼로그] - 실수로 지우는 일 방지
+    taskToDelete?.let { t ->
+        AlertDialog(
+            onDismissRequest = { taskToDelete = null },
+            title = { Text("⚠️ 할 일 삭제", fontWeight = FontWeight.Bold) },
+            text = { Text("'${t.title}' 할 일을 정말 삭제하시겠습니까?\n삭제된 할 일은 복구할 수 없습니다.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            taskRepo.deleteTask(t.spaceId, t.id)
+                            OngoingNotificationManager.updateOngoingNotification(context)
+                            Toast.makeText(context, "'${t.title}' 할 일을 삭제했어요", Toast.LENGTH_SHORT).show()
+                        }
+                        taskToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                ) {
+                    Text("삭제", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { taskToDelete = null }) {
+                    Text("취소")
+                }
+            }
+        )
+    }
+
+    // 🌟 [루틴 삭제 확인 다이얼로그] - 실수로 지우는 일 방지
+    routineToDelete?.let { r ->
+        AlertDialog(
+            onDismissRequest = { routineToDelete = null },
+            title = { Text("⚠️ 매일 루틴 삭제", fontWeight = FontWeight.Bold) },
+            text = { Text("'${r.title}' 매일 루틴을 정말 삭제하시겠습니까?\n삭제하시면 두 분 모두의 목록에서 완전히 사라집니다.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            taskRepo.deleteRoutine(r.spaceId, r.id)
+                            OngoingNotificationManager.updateOngoingNotification(context)
+                            Toast.makeText(context, "'${r.title}' 루틴을 삭제했어요", Toast.LENGTH_SHORT).show()
+                        }
+                        routineToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                ) {
+                    Text("삭제", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { routineToDelete = null }) {
+                    Text("취소")
+                }
+            }
+        )
+    }
+
+    // 🌟 [루틴 이름 수정 다이얼로그]
+    editingRoutine?.let { r ->
+        AlertDialog(
+            onDismissRequest = { editingRoutine = null },
+            title = { Text("✏️ 매일 루틴 이름 수정", fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = routineNewTitle,
+                    onValueChange = { if (it.length <= 50) routineNewTitle = it },
+                    label = { Text("루틴 이름 (최대 50자)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (routineNewTitle.isNotBlank()) {
+                            scope.launch {
+                                taskRepo.updateRoutineTitle(r.spaceId, r.id, routineNewTitle)
+                                taskRepo.syncRoutinesFromServer(r.spaceId)
+                                Toast.makeText(context, "루틴 이름을 수정했어요", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        editingRoutine = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(currentTheme.accentHex))
+                ) {
+                    Text("저장", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingRoutine = null }) {
+                    Text("취소")
+                }
+            }
+        )
+    }
+
+    // 🌟 [방 이름 수정 다이얼로그]
+    if (showRenameDialog && renameTargetSpace != null) {
+        val target = renameTargetSpace!!
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("✏️ 방 이름 수정", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("새로운 방 이름을 입력해 주세요:", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = renameInputText,
+                        onValueChange = { if (it.length <= 20) renameInputText = it },
+                        label = { Text("방 이름 (예: 우리 부부, 딸내미)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (renameInputText.isNotBlank()) {
+                            scope.launch {
+                                spaceRepo.updateSpaceTitle(target.id, renameInputText)
+                                spaceRepo.syncSpacesFromServer()
+                                Toast.makeText(context, "방 이름을 '${renameInputText}'(으)로 변경했어요 🌸", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        showRenameDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(currentTheme.accentHex))
+                ) {
+                    Text("저장", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("취소")
+                }
+            }
+        )
+    }
+
+    // 🌟 [1:1 방 2명 한정 안내 다이얼로그]
+    if (showMemberLimitDialog) {
+        AlertDialog(
+            onDismissRequest = { showMemberLimitDialog = false },
+            title = { Text("👥 1:1 방 인원 안내", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "⚠️ '${currentSpace?.title}' 방은 이미 2명이 함께하고 있어요.\n\n" +
+                    "토닥토닥은 둘만의 약속을 소중히 지키기 위한 1:1 공간으로 설계되었습니다.\n\n" +
+                    "다른 가족이나 친구와 함께하시려면 상단의 [+] 버튼을 눌러 새로운 방을 만들어 초대해 주세요! 🌸",
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showMemberLimitDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(currentTheme.accentHex))
+                ) {
+                    Text("확인", color = Color.White)
+                }
+            }
+        )
+    }
+
+    // 4자리 초대 코드 확인 다이얼로그 (유효시간 30분 & '방이름 함께하기')
     if (showInviteDialog && generatedCode != null) {
         val roomTitle = currentSpace?.title ?: "우리 공간"
         AlertDialog(
             onDismissRequest = { showInviteDialog = false },
-            title = { Text("🏡 '${roomTitle}' 초대 코드", fontWeight = FontWeight.Bold) },
+            title = { Text("💌 '${roomTitle}' 함께하기", fontWeight = FontWeight.Bold) },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     if (mySpaces.size > 1) {
@@ -604,7 +952,7 @@ fun MainScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "(코드는 10분간 유효하며, 연결 완료 시 자동으로 소멸됩니다)",
+                        "(⏳ 코드는 30분간 유효하며, 연결 완료 시 자동으로 소멸됩니다)",
                         fontSize = 12.sp,
                         color = Color.Gray
                     )
@@ -980,6 +1328,7 @@ private fun TaskCardItem(
     task: Task,
     todayDate: String,
     theme: ThemeColor,
+    spaceBadge: String? = null,
     onToggle: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -1020,6 +1369,22 @@ private fun TaskCardItem(
             Spacer(modifier = Modifier.width(14.dp))
 
             Column(modifier = Modifier.weight(1f)) {
+                if (!spaceBadge.isNullOrBlank()) {
+                    Surface(
+                        color = Color(theme.accentHex).copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    ) {
+                        Text(
+                            text = "🏷️ $spaceBadge",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(theme.accentHex),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
                 Text(
                     text = task.title,
                     fontSize = 17.sp,
@@ -1083,6 +1448,7 @@ private fun RoutineCardItem(
     routine: DailyRoutine,
     todayDate: String,
     theme: ThemeColor,
+    spaceBadge: String? = null,
     onCheck: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -1107,12 +1473,29 @@ private fun RoutineCardItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "🔁 매일 반복",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(theme.accentHex)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "🔁 매일 반복",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(theme.accentHex)
+                    )
+                    if (!spaceBadge.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            color = Color(theme.accentHex).copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "🏷️ $spaceBadge",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(theme.accentHex),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
 
                 if (isDone) {
                     Text(

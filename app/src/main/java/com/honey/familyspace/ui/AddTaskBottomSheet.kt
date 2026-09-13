@@ -91,7 +91,7 @@ fun AddTaskBottomSheet(
             val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
             val spokenText = matches?.firstOrNull()
             if (!spokenText.isNullOrBlank()) {
-                taskTitle = spokenText
+                taskTitle = spokenText.take(50)
                 errorMessage = null
             }
         }
@@ -183,7 +183,7 @@ fun AddTaskBottomSheet(
             ) {
                 OutlinedTextField(
                     value = taskTitle,
-                    onValueChange = { taskTitle = it },
+                    onValueChange = { if (it.length <= 50) taskTitle = it },
                     placeholder = {
                         Text(
                             if (selectedLang == "en-US") "Type a task or tap mic" else "할 일을 입력하거나 마이크를 누르세요",
@@ -218,10 +218,10 @@ fun AddTaskBottomSheet(
                                 isListening = true
                                 voiceManager.startListening(
                                     languageCode = selectedLang,
-                                    onPartialResult = { partialText -> taskTitle = partialText },
+                                    onPartialResult = { partialText -> taskTitle = partialText.take(50) },
                                     onResult = { spokenText ->
                                         isListening = false
-                                        taskTitle = spokenText
+                                        taskTitle = spokenText.take(50)
                                     },
                                     onError = { err ->
                                         isListening = false
@@ -245,6 +245,21 @@ fun AddTaskBottomSheet(
                         modifier = Modifier.size(28.dp)
                     )
                 }
+            }
+
+            // 50자 글자 수 카운터 표시
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, end = 6.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    text = "${taskTitle.length}/50자",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (taskTitle.length >= 50) Color(0xFFE53935) else Color.Gray
+                )
             }
 
             if (isListening) {

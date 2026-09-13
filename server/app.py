@@ -537,7 +537,7 @@ def create_space():
 
     space_id = str(uuid.uuid4())
     now_ms = int(time.time() * 1000)
-    expires_at = now_ms + (10 * 60 * 1000)  # 10분 유효
+    expires_at = now_ms + (30 * 60 * 1000)  # 30분 유효
 
     db = get_db()
     try:
@@ -553,7 +553,6 @@ def create_space():
 
         # 동시에 유효한 다른 초대 코드와 중복되지 않는 4자리 숫자 코드 생성
         code = generate_unique_invite_code(db)
-        # Turso / SQLite 공통 처리
         _q(db,
             "INSERT INTO spaces (id, title, theme_color, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
             (space_id, title, theme_color, user_id, now_ms)
@@ -576,7 +575,7 @@ def create_space():
                 "created_by": user_id
             },
             "invite_code": code,
-            "expires_in_minutes": 10
+            "expires_in_minutes": 30
         }), 201
     except Exception as e:
         import traceback as _tb
@@ -591,20 +590,50 @@ def create_space():
         _db_close(db)
 
 
+@app.route("/api/spaces/<space_id>", methods=["PATCH"])
+def update_space(space_id):
+    """스페이스 제목/테마 수정 (방 이름 언제든 변경)"""
+    data = request.json or {}
+    title = data.get("title", "").strip()
+    theme_color = data.get("theme_color")
+
+    if not title and not theme_color:
+        return jsonify({"error": "수정할 내용이 없습니다."}), 400
+
+    db = get_db()
+    try:
+        if title:
+            _q(db, "UPDATE spaces SET title = ? WHERE id = ?", (title, space_id))
+        if theme_color:
+            _q(db, "UPDATE spaces SET theme_color = ? WHERE id = ?", (theme_color, space_id))
+        _db_commit(db)
+        return jsonify({"message": "방 이름이 수정되었습니다.", "title": title}), 200
+    finally:
+        _db_close(db)
+
+
 @app.route("/api/spaces/<space_id>/invite", methods=["GET"])
 def get_space_invite(space_id):
-    """스페이스의 유효한 초대 코드 조회 (없거나 만료 시 새로 발급)"""
+    """스페이스의 유효한 초대 코드 조회 (1:1 2명 한정 검증 및 30분 만료)"""
     db = get_db()
     try:
         now_ms = int(time.time() * 1000)
 
-        # 스페이스 존재 여부 확인
-        s_res = _q(db, "SELECT id FROM spaces WHERE id = ?", (space_id,))
+        # 1. 스페이스 존재 및 멤버 수(2명 한정) 확인
+        s_res = _q(db, "SELECT id, title FROM spaces WHERE id = ?", (space_id,))
         s_rows = _rows(s_res)
         if not s_rows:
             return jsonify({"error": "존재하지 않는 스페이스입니다."}), 404
 
-        # 아직 유효한 초대 코드가 있으면 재사용 (10분 내 반복 조회 지원)
+        m_res = _q(db, "SELECT COUNT(*) FROM space_members WHERE space_id = ?", (space_id,))
+        m_count = _cell(m_res) or 0
+        if m_count >= 2:
+            return jsonify({
+                "error": "이미 2명이 모두 연결된 오붓한 공간이에요 🌸\n새로운 분과 함께하시려면 [+ 새 방 만들기]로 새로운 1:1 방을 만들어 보세요!",
+                "is_full": True
+            }), 400
+
+        # 아직 유효한 초대 코드가 있으면 재사용 (30분 유효)
         i_rows = _rows(_q(db,
             "SELECT code, expires_at FROM invites WHERE space_id = ? AND expires_at > ?",
             (space_id, now_ms)
@@ -615,24 +644,24 @@ def get_space_invite(space_id):
             remaining = max(1, int((expires_at - now_ms) / 60000))
             return jsonify({"invite_code": raw, "expires_in_minutes": remaining}), 200
 
-        # 유효 코드가 없으면 새로 발급 (기존 만료 코드 정리 후)
+        # 유효 코드가 없으면 새로 발급 (30분 유효)
         _q(db, "DELETE FROM invites WHERE space_id = ?", (space_id,))
         code = generate_unique_invite_code(db)
-        expires_at = now_ms + (10 * 60 * 1000)
+        expires_at = now_ms + (30 * 60 * 1000)
         _q(db, 
             "INSERT INTO invites (code, space_id, created_by, expires_at) VALUES (?, ?, ?, ?)",
             (code.replace("-", ""), space_id, None, expires_at)
         )
         _db_commit(db)
 
-        return jsonify({"invite_code": code, "expires_in_minutes": 10}), 200
+        return jsonify({"invite_code": code, "expires_in_minutes": 30}), 200
     finally:
         _db_close(db)
 
 
 @app.route("/api/spaces/join", methods=["POST"])
 def join_space():
-    """4자리 숫자 초대 코드로 참여 (참여 즉시 코드 영구 소멸)"""
+    """4자리 숫자 초대 코드로 참여 (1:1 2명 제한 보호)"""
     data = request.json or {}
     raw_code = data.get("code", "").replace("-", "").replace(" ", "").upper()
     user_id = data.get("user_id") or str(uuid.uuid4())
@@ -655,7 +684,15 @@ def join_space():
         if now_ms > expires_at:
             _q(db, "DELETE FROM invites WHERE code = ?", (raw_code,))
             _db_commit(db)
-            return jsonify({"error": "초대 코드 유효 시간(10분)이 만료되었습니다."}), 410
+            return jsonify({"error": "초대 코드 유효 시간(30분)이 만료되었습니다."}), 410
+
+        # 1:1 인원 제한 (2명 초과 방지)
+        m_res = _q(db, "SELECT COUNT(*) FROM space_members WHERE space_id = ?", (space_id,))
+        m_count = _cell(m_res) or 0
+        if m_count >= 2:
+            return jsonify({
+                "error": "이 방은 이미 2명이 연결 완료된 오붓한 공간입니다. 새로운 1:1 방을 만들어 주세요."
+            }), 400
 
         # 멤버 추가 및 코드 즉시 소멸
         _q(db, 
@@ -1105,8 +1142,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 10
-CURRENT_APP_VERSION_NAME = "1.3.6"
+CURRENT_APP_VERSION_CODE = 11
+CURRENT_APP_VERSION_NAME = "1.3.7"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1117,7 +1154,7 @@ def get_app_version():
         # 고정 자산명: 구버전 앱(app-debug.apk 링크 내장) 호환을 위해 폴백 URL도 함께 제공
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk",
-        "changelog": "🎉 v1.3.6\n- ⏰ 특정 시각 소리 알람 신규 탑재 (모닝콜/약 챙기기 소리 & 끄기 화면)\n- 🎙️ 구글 공식 고성능 신경망 음성인식 다이얼로그 연동 (인식률 95%+)\n- 📲 자녀 아이폰(iOS) 전용 모바일 PWA 웹앱 정식 오픈\n- 할 일 카드에 알람 시각 뱃지(⏰ 오전 10:00 등) 표시"
+        "changelog": "🎉 v1.3.7 대규모 명품 업그레이드\n- 🌈 [전체보기] 알약 탭 및 카드별 컬러풀 [방 이름 뱃지] 신설\n- 🔄 아내/가족 할 일 3초 실시간 즉각 동기화 & 쓸어내려 새로고침(Swipe-to-Refresh)\n- 📱 홈 화면 위젯 안심 대시보드 개편 (터치 시 안전하게 앱 실행)\n- 🛡️ 꾹 눌렀을 때 무단 삭제 방지 ([수정/삭제] 선택 & 삭제 경고 확인창)\n- 🎙️ 음성 입력 말 쉼 종료 방지 (직접 종료 누를 때까지 경청) & 50자 제한\n- 💌 초대 문구 '함께하기' 개편 & 유효시간 30분 확대 & 방 이름 변경 기능"
     }), 200
 
 

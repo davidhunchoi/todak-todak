@@ -215,8 +215,33 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
             // 서버 연결 실패 시 아래 로컬 폴백 사용
         }
 
-        // 로컬 폴백: 새 코드 생성 (서버에 등록되지 않아 상대 연결은 서버 복구 후 필요)
         Result.success(InviteCodeGenerator.generateFormattedCode())
+    }
+
+    /**
+     * 방 이름 언제든 변경 (서버 및 로컬 즉각 동기화)
+     */
+    suspend fun updateSpaceTitle(spaceId: String, newTitle: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val trimmed = newTitle.trim()
+        if (trimmed.isBlank()) return@withContext Result.failure(IllegalArgumentException("방 이름을 입력해 주세요."))
+
+        // 로컬 즉시 반영
+        spacesStateFlow.value = spacesStateFlow.value.map {
+            if (it.id == spaceId) it.copy(title = trimmed) else it
+        }
+
+        try {
+            val jsonBody = JSONObject().apply {
+                put("title", trimmed)
+            }
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId")
+                .patch(jsonBody.toString().toRequestBody(JSON))
+                .build()
+            client.newCall(request).execute()
+        } catch (e: Exception) {}
+
+        Result.success(Unit)
     }
 
     /**

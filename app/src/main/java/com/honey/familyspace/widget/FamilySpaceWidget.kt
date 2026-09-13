@@ -127,11 +127,26 @@ class FamilySpaceWidget : GlanceAppWidget() {
                         color = androidx.glance.unit.ColorProvider(Color(theme.accentHex))
                     )
                 )
+
+                Spacer(modifier = GlanceModifier.width(8.dp))
+
+                // 원터치 새로고침 버튼
+                Text(
+                    text = "🔄",
+                    style = TextStyle(fontSize = 14.sp),
+                    modifier = GlanceModifier
+                        .clickable(actionRunCallback<RefreshWidgetActionCallback>())
+                        .padding(4.dp)
+                )
             }
 
             Spacer(modifier = GlanceModifier.height(10.dp))
 
-            // 2. 안심 루틴 카드 (약 먹기 원터치 체크 버튼)
+            val openAppIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+
+            // 2. 안심 루틴 카드 (터치 시 안전하게 앱 열기)
             if (routine != null) {
                 val isDone = routine.isCompletedToday(todayString)
                 val routineBg = if (isDone) Color(0xFFE8F5E9) else Color(theme.accentHex)
@@ -139,7 +154,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
                 val statusText = if (isDone) {
                     "✅ ${routine.title}: ${routine.lastCompletedTime} 복용 완료"
                 } else {
-                    "💊 ${routine.title}: 먹었어요! (탭하여 완료)"
+                    "💊 ${routine.title}: 오늘 챙기기 (앱에서 체크)"
                 }
 
                 Box(
@@ -148,14 +163,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
                         .background(routineBg)
                         .cornerRadius(14.dp)
                         .padding(horizontal = 12.dp, vertical = 10.dp)
-                        .clickable(
-                            actionRunCallback<ToggleRoutineActionCallback>(
-                                actionParametersOf(
-                                    ActionParameters.Key<String>("spaceId") to activeSpaceId,
-                                    ActionParameters.Key<String>("routineId") to routine.id
-                                )
-                            )
-                        ),
+                        .clickable(actionStartActivity(openAppIntent)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -171,12 +179,13 @@ class FamilySpaceWidget : GlanceAppWidget() {
                 Spacer(modifier = GlanceModifier.height(10.dp))
             }
 
-            // 3. 오늘 할 일 리스트 (최대 3개 노출)
+            // 3. 오늘 할 일 리스트 (터치 시 안전하게 앱 열기 - 오작동 방지)
             if (tasks.isEmpty()) {
                 Box(
                     modifier = GlanceModifier
                         .fillMaxWidth()
-                        .defaultWeight(),
+                        .defaultWeight()
+                        .clickable(actionStartActivity(openAppIntent)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -194,7 +203,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
                         .defaultWeight()
                 ) {
                     items(tasks.take(3)) { task ->
-                        TaskItemRow(task, activeSpaceId, theme)
+                        TaskItemRow(task, theme, openAppIntent)
                         Spacer(modifier = GlanceModifier.height(6.dp))
                     }
                 }
@@ -202,26 +211,20 @@ class FamilySpaceWidget : GlanceAppWidget() {
 
             Spacer(modifier = GlanceModifier.height(6.dp))
 
-            // 4. 하단 원터치 앱 열기 / 할 일 추가 버튼
-            val openAppIntent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-
+            // 4. 하단 원터치 앱 열기 버튼
             Row(
-                modifier = GlanceModifier
-                    .fillMaxWidth()
-                    .clickable(actionStartActivity<MainActivity>()),
-                horizontalAlignment = Alignment.End,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = GlanceModifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.End
             ) {
                 Box(
                     modifier = GlanceModifier
+                        .clickable(actionStartActivity(openAppIntent))
                         .background(Color(theme.accentHex))
                         .cornerRadius(12.dp)
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text(
-                        text = "+ 할 일 추가 / 앱 열기",
+                        text = "토닥토닥 열기 🌸",
                         style = TextStyle(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
@@ -234,7 +237,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
     }
 
     @Composable
-    private fun TaskItemRow(task: Task, spaceId: String, theme: ThemeColor) {
+    private fun TaskItemRow(task: Task, theme: ThemeColor, openAppIntent: Intent) {
         val checkIcon = if (task.isCompleted) "☑" else "☐"
         val textColor = if (task.isCompleted) Color(0xFF9E9E9E) else Color(theme.textColor)
 
@@ -244,15 +247,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
                 .background(Color.White)
                 .cornerRadius(12.dp)
                 .padding(horizontal = 10.dp, vertical = 8.dp)
-                .clickable(
-                    actionRunCallback<ToggleTaskActionCallback>(
-                        actionParametersOf(
-                            ActionParameters.Key<String>("spaceId") to spaceId,
-                            ActionParameters.Key<String>("taskId") to task.id,
-                            ActionParameters.Key<Boolean>("status") to task.isCompleted
-                        )
-                    )
-                ),
+                .clickable(actionStartActivity(openAppIntent)),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -280,43 +275,6 @@ class FamilySpaceWidget : GlanceAppWidget() {
 }
 
 /**
- * 위젯 내 약 복용 클릭 시 백그라운드 처리 콜백
- */
-class ToggleRoutineActionCallback : ActionCallback {
-    override suspend fun onAction(
-        context: Context,
-        glanceId: GlanceId,
-        parameters: ActionParameters
-    ) {
-        val spaceId = parameters[ActionParameters.Key<String>("spaceId")] ?: return
-        val routineId = parameters[ActionParameters.Key<String>("routineId")] ?: return
-
-        val repo = TaskRepository()
-        repo.checkRoutineDone(spaceId, routineId)
-
-        // 위젯 및 상단바 알림 즉시 갱신
-        FamilySpaceWidget().update(context, glanceId)
-        OngoingNotificationManager.updateOngoingNotification(context)
-    }
-}
-
-/**
- * 위젯 내 할 일 체크 클릭 시 백그라운드 처리 콜백
- */
-class ToggleTaskActionCallback : ActionCallback {
-    override suspend fun onAction(
-        context: Context,
-        glanceId: GlanceId,
-        parameters: ActionParameters
-    ) {
-        val spaceId = parameters[ActionParameters.Key<String>("spaceId")] ?: return
-        val taskId = parameters[ActionParameters.Key<String>("taskId")] ?: return
-        val status = parameters[ActionParameters.Key<Boolean>("status")] ?: false
-
-        val repo = TaskRepository()
-        repo.toggleTask(spaceId, taskId, status)
-
-        // 위젯 및 상단바 알림 즉시 갱신
         FamilySpaceWidget().update(context, glanceId)
         OngoingNotificationManager.updateOngoingNotification(context)
     }

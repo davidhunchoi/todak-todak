@@ -62,6 +62,17 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         return getTaskFlow(spaceId).asStateFlow()
     }
 
+    /**
+     * 참여 중인 모든 방의 할 일을 한 번에 모아보기 위한 Flow
+     */
+    fun observeAllTasks(spaceIds: List<String>): Flow<List<Task>> {
+        if (spaceIds.isEmpty()) return kotlinx.coroutines.flow.flowOf(emptyList())
+        val flows = spaceIds.map { getTaskFlow(it) }
+        return kotlinx.coroutines.flow.combine(flows) { arrays ->
+            arrays.flatMap { it }.sortedByDescending { it.createdAt }
+        }
+    }
+
     suspend fun addTask(
         spaceId: String,
         title: String,
@@ -219,12 +230,110 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         Result.success(Unit)
     }
 
+    /**
+     * 서버에서 최신 할 일 목록을 가져와 로컬 StateFlow 및 알람, 위젯 즉시 갱신
+     * (아내나 자녀가 등록/체크한 내역이 3초 내에 내 폰에 실시간 반영되는 핵심 함수)
+     */
+    suspend fun syncTasksFromServer(spaceId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/tasks")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(IllegalStateException("할 일 동기화 실패 (${response.code})"))
+            }
+
+            val resJson = JSONObject(response.body?.string() ?: "")
+            val tasksArray = resJson.optJSONArray("tasks") ?: return@withContext Result.failure(
+                IllegalStateException("할 일 응답 형식 오류")
+            )
+
+            val flow = getTaskFlow(spaceId)
+            val syncedList = mutableListOf<Task>()
+
+            for (i in 0 until tasksArray.length()) {
+                val t = tasksArray.getJSONObject(i)
+                val taskId = t.optString("id")
+                val title = t.optString("title")
+                val dueDate = t.optString("due_date", "")
+                val isCompleted = t.optBoolean("is_completed", false)
+                val alarmTime = t.optString("alarm_time", "").takeIf { it.isNotBlank() }
+                val hasAlarm = t.optBoolean("has_alarm", false)
+
+                val task = Task(
+                    id = taskId,
+                    spaceId = spaceId,
+                    title = title,
+                    dueDate = dueDate,
+                    isCompleted = isCompleted,
+                    createdAt = System.currentTimeMillis(),
+                    alarmTime = alarmTime,
+                    hasAlarm = hasAlarm
+                )
+                syncedList.add(task)
+
+                // 알람 스케줄러 동기화 (미완료 알람 항목 자동 예약)
+                dataStore?.context?.let { ctx ->
+                    if (hasAlarm && !isCompleted && !alarmTime.isNullOrBlank()) {
+                        com.honey.familyspace.notification.TaskAlarmScheduler.scheduleTaskAlarm(ctx, task)
+                    } else {
+                        com.honey.familyspace.notification.TaskAlarmScheduler.cancelTaskAlarm(ctx, taskId)
+                    }
+                }
+            }
+
+            flow.value = syncedList
+
+            // 위젯 및 상단바 알림 실시간 갱신
+            dataStore?.context?.let { ctx ->
+                try {
+                    com.honey.familyspace.widget.FamilySpaceWidget().updateAll(ctx)
+                    com.honey.familyspace.notification.OngoingNotificationManager.updateOngoingNotification(ctx)
+                } catch (e: Exception) {}
+            }
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // ==========================================
     // 2. 매일 루틴 (DailyRoutine) - 약 먹기 특화
     // ==========================================
 
     fun observeRoutines(spaceId: String): Flow<List<DailyRoutine>> {
         return getRoutineFlow(spaceId).asStateFlow()
+    }
+
+    /**
+     * 참여 중인 모든 방의 매일 루틴을 한 번에 모아보기 위한 Flow
+     */
+    fun observeAllRoutines(spaceIds: List<String>): Flow<List<DailyRoutine>> {
+        if (spaceIds.isEmpty()) return kotlinx.coroutines.flow.flowOf(emptyList())
+        val flows = spaceIds.map { getRoutineFlow(it) }
+        return kotlinx.coroutines.flow.combine(flows) { arrays ->
+            arrays.flatMap { it }.sortedByDescending { it.createdAt }
+        }
+    }
+
+    /**
+     * 매일 루틴 제목 수정
+     */
+    suspend fun updateRoutineTitle(
+        spaceId: String,
+        routineId: String,
+        newTitle: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val flow = getRoutineFlow(spaceId)
+        val currentList = flow.value
+        flow.value = currentList.map {
+            if (it.id == routineId) it.copy(title = newTitle.trim()) else it
+        }
+        Result.success(Unit)
     }
 
     suspend fun addRoutine(
