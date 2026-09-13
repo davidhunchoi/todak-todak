@@ -101,9 +101,14 @@ jobs:
         run: |
           echo "### ❌ Gradle Build Error Log" >> $GITHUB_STEP_SUMMARY
           echo '```text' >> $GITHUB_STEP_SUMMARY
-          # FAILURE/error/Exception/Caused by 위주로 300줄 출력 (원인 파악 강화)
-          grep -n "FAILURE\|error:\|Caused by:\|> Task\|Exception\|BUILD FAILED\|BUILD SUCCESSFUL" build.log | tail -n 100 >> $GITHUB_STEP_SUMMARY || true
-          echo '---' >> $GITHUB_STEP_SUMMARY
+          # 1. Kotlin 컴파일 에러만 먼저 추출 (가장 중요한 원인)
+          echo "=== KOTLIN COMPILE ERRORS ===" >> $GITHUB_STEP_SUMMARY
+          grep -n "error:\|Unresolved reference\|None of the following\|Cannot access\|not found\|Type mismatch\|Overload resolution ambiguity\|Val cannot be reassigned" build.log | head -n 50 >> $GITHUB_STEP_SUMMARY || true
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "=== GRADLE FAILURE SUMMARY ===" >> $GITHUB_STEP_SUMMARY
+          grep -n "FAILURE\|BUILD FAILED\|Caused by:\|> Task\|> Could not" build.log | tail -n 30 >> $GITHUB_STEP_SUMMARY || true
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "=== LAST 300 LINES ===" >> $GITHUB_STEP_SUMMARY
           tail -n 300 build.log >> $GITHUB_STEP_SUMMARY || echo "(build.log 없음)" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
