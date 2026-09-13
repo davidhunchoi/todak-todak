@@ -1073,8 +1073,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 6
-CURRENT_APP_VERSION_NAME = "1.3.2"
+CURRENT_APP_VERSION_CODE = 7
+CURRENT_APP_VERSION_NAME = "1.3.3"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1085,7 +1085,7 @@ def get_app_version():
         # 고정 자산명: 구버전 앱(app-debug.apk 링크 내장) 호환을 위해 폴백 URL도 함께 제공
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk",
-        "changelog": "🎉 v1.3.2\n- Turso DB 자동 컬럼 마이그레이션 적용 및 방 만들기 완벽 정상화\n- 초대 코드 자동 발급 및 1:1 연결 안정성 강화\n- 오늘 챙길 일 카운트에 매일 루틴 통합 및 홈 화면 위젯 실시간 갱신\n- 원터치 루틴 토글 및 롱클릭 수정/삭제 지원"
+        "changelog": "🎉 v1.3.3\n- 정식 릴리스 서명 키스토어 적용 (향후 무삭제 원터치 덮어쓰기 업데이트 완벽 지원)\n- Turso DB 자동 컬럼 마이그레이션 적용 및 방 만들기 완벽 정상화\n- 초대 코드 자동 발급 및 1:1 연결 안정성 강화"
     }), 200
 
 
