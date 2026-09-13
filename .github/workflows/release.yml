@@ -67,13 +67,22 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
+          set -o pipefail
           if [ -f "$RUNNER_TEMP/release.keystore" ]; then
-            ./gradlew assembleRelease --no-daemon --stacktrace
+            ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
             cp app/build/outputs/apk/release/app-release.apk app-release.apk
           else
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
             cp app/build/outputs/apk/debug/app-debug.apk app-release.apk
           fi
+
+      - name: Report Build Error Log
+        if: failure()
+        run: |
+          echo "### ❌ Gradle Build Error Log" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          tail -n 120 build.log >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Verify artifact
         run: |

@@ -89,7 +89,7 @@ class TaskAlarmActivity : ComponentActivity() {
                         lifecycleScope.launch {
                             try {
                                 val taskRepo = TaskRepository(DataStoreManager(this@TaskAlarmActivity))
-                                taskRepo.toggleTask(spaceId, taskId, isCurrentCompleted = false)
+                                taskRepo.toggleTask(spaceId, taskId, false)
                             } catch (e: Exception) {}
                             stopAndFinish(taskId)
                         }
