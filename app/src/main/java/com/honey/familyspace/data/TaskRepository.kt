@@ -44,42 +44,13 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
 
     private fun getTaskFlow(spaceId: String): MutableStateFlow<List<Task>> {
         return tasksMap.getOrPut(spaceId) {
-            MutableStateFlow(
-                listOf(
-                    Task(
-                        id = "sample-task-1",
-                        spaceId = spaceId,
-                        title = "세탁소에서 옷 찾아오기",
-                        dueDate = DateTimeUtils.getTodayDateString(),
-                        isCompleted = false
-                    ),
-                    Task(
-                        id = "sample-task-2",
-                        spaceId = spaceId,
-                        title = "주말 마트 장보기 (우유, 사과)",
-                        dueDate = DateTimeUtils.getTomorrowDateString(),
-                        isCompleted = false
-                    )
-                )
-            )
+            MutableStateFlow(emptyList())
         }
     }
 
     private fun getRoutineFlow(spaceId: String): MutableStateFlow<List<DailyRoutine>> {
         return routinesMap.getOrPut(spaceId) {
-            MutableStateFlow(
-                listOf(
-                    DailyRoutine(
-                        id = "routine-pill-1",
-                        spaceId = spaceId,
-                        title = "아침 혈압약 & 영양제 챙겨먹기",
-                        iconType = "PILL",
-                        targetTime = "08:30",
-                        lastCompletedDate = "",
-                        lastCompletedTime = ""
-                    )
-                )
-            )
+            MutableStateFlow(emptyList())
         }
     }
 

@@ -42,7 +42,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import com.honey.familyspace.notification.ReminderScheduler
@@ -119,6 +121,16 @@ fun MainScreen(
     var generatedCode by remember { mutableStateOf<String?>(null) }
     var updateInfo by remember { mutableStateOf<AppUpdateManager.UpdateInfo?>(null) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
+
+    // 현재 앱 버전 (실제 설치된 APK 버전 정보 실시간 조회)
+    val appVersion = remember {
+        try {
+            val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            "v${pInfo.versionName ?: "1.3.4"}"
+        } catch (_: Exception) {
+            "v1.3.4"
+        }
+    }
 
     // 주기적 잔소리 알림 설정 상태
     val reminderInterval by dataStore.reminderIntervalHoursFlow.collectAsState(initial = 2)
@@ -211,22 +223,40 @@ fun MainScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "🏠 ${currentSpace?.title ?: "우리 공간"}",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(currentTheme.textColor),
-                        modifier = Modifier.combinedClickable(
-                            onClick = {},
-                            onLongClick = {
-                                // 방 이름 길게 누르기 → 방 삭제 요청 (상대방 동의 필요)
-                                currentSpace?.let { space ->
-                                    deleteTargetSpace = space
-                                    showDeleteDialog = true
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        Text(
+                            text = "🏠 ${currentSpace?.title ?: "우리 공간"}",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(currentTheme.textColor),
+                            modifier = Modifier.combinedClickable(
+                                onClick = {},
+                                onLongClick = {
+                                    // 방 이름 길게 누르기 → 방 삭제 요청 (상대방 동의 필요)
+                                    currentSpace?.let { space ->
+                                        deleteTargetSpace = space
+                                        showDeleteDialog = true
+                                    }
                                 }
-                            }
+                            )
                         )
-                    )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            color = Color(currentTheme.accentHex).copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = appVersion,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(currentTheme.accentHex),
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         // 1. 초대 코드 입력 버튼 (상시 노출)
@@ -466,6 +496,15 @@ fun MainScreen(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "토닥토닥 $appVersion",
+                fontSize = 11.sp,
+                color = Color.Gray.copy(alpha = 0.45f),
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
         }
     }
 

@@ -4,13 +4,47 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- 1. 지붕 위 따스하게 반짝이는 온기 스파클 (골드 스타) -->
+    <path
+        android:fillColor="#FFF176"
+        android:pathData="M37,22 C37.2,25 39,26.8 42,27 C39,27.2 37.2,29 37,32 C36.8,29 35,27.2 32,27 C35,26.8 36.8,25 37,22 Z" />
+
+    <!-- 2. 지붕 굴뚝 -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M30,44h48v4h-48z" />
+        android:pathData="M68,31 L73,31 L73,42 L68,38 Z" />
+
+    <!-- 3. 포근한 스위트홈 지붕 처마 (부드러운 라운드 라인) -->
+    <path
+        android:pathData="M27,50 L54,29 L81,50"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- 4. 집 바닥 받침 베이스 라인 (포근한 보금자리) -->
+    <path
+        android:pathData="M34,80 L74,80"
+        android:strokeColor="#FFFFFFAA"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round" />
+
+    <!-- 5. 오빠 하트 (좌측 큰 하트 - 퓨어 화이트) -->
+    <!-- 중심 (44, 62) 부근, 따뜻하게 아내를 향해 감싸는 형태 -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M30,54h48v4h-48z" />
+        android:pathData="M44,74 C44,74 32,66 32,58 C32,52.5 36.5,49 41.5,49 C44.5,49 47,50.8 48,53 C49,50.8 51.5,49 54.5,49 C59.5,49 64,52.5 64,58 C64,66 52,74 52,74 Z" />
+
+    <!-- 6. 아내 하트 (우측 다정한 핑크 코랄 하트 - 오빠에게 기대어 있는 사랑스러운 형태) -->
+    <!-- 중심 (60, 64) 부근, 살짝 포개어져 서로를 토닥이는 듀오 하트 -->
+    <path
+        android:fillColor="#FFD1C9"
+        android:pathData="M61,74 C61,74 51,67.5 51,61 C51,56.5 54.5,53.5 58.5,53.5 C61,53.5 63,55 64,56.8 C65,55 67,53.5 69.5,53.5 C73.5,53.5 77,56.5 77,61 C77,67.5 67,74 67,74 Z" />
+
+    <!-- 7. 아내 하트 안쪽 은은한 하이라이트 (생동감) -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M30,64h32v4h-32z" />
+        android:pathData="M60.5,56 C59.2,56 58,56.8 57.5,58 C57,59 57,60.5 57,60.5 C57,60.5 56.5,59 57.2,57.5 C58,56 59.5,55.5 60.5,56 Z" />
+
 </vector>
