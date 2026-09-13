@@ -843,7 +843,8 @@ def get_user_spaces(user_id):
     db = get_db()
     try:
         query = """
-            SELECT s.id, s.title, s.theme_color, s.created_by, s.created_at
+            SELECT s.id, s.title, s.theme_color, s.created_by, s.created_at,
+                   (SELECT COUNT(*) FROM space_members WHERE space_id = s.id) AS member_count
             FROM spaces s
             JOIN space_members sm ON s.id = sm.space_id
             WHERE sm.user_id = ?
@@ -856,7 +857,8 @@ def get_user_spaces(user_id):
             spaces.append({
                 "id": _row_get(r, "id", 0),
                 "title": _row_get(r, "title", 1),
-                "theme_color": _row_get(r, "theme_color", 2)
+                "theme_color": _row_get(r, "theme_color", 2),
+                "member_count": _row_get(r, "member_count", 5) or 1
             })
         return jsonify({"spaces": spaces}), 200
     finally:

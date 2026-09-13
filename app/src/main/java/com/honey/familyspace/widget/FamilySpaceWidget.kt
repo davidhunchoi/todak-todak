@@ -193,12 +193,13 @@ class FamilySpaceWidget : GlanceAppWidget() {
                     )
                 }
             } else {
+                val displayTasks = tasks.sortedWith(compareBy<Task> { it.isCompleted }.thenByDescending { it.createdAt }).take(30)
                 LazyColumn(
                     modifier = GlanceModifier
                         .fillMaxWidth()
                         .defaultWeight()
                 ) {
-                    items(tasks.take(3)) { task ->
+                    items(displayTasks) { task ->
                         TaskItemRow(task, theme)
                         Spacer(modifier = GlanceModifier.height(6.dp))
                     }

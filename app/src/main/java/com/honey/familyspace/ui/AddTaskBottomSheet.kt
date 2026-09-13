@@ -35,6 +35,9 @@ import android.app.TimePickerDialog
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -42,9 +45,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.honey.familyspace.model.ThemeColor
 import com.honey.familyspace.util.DateTimeUtils
+import com.honey.familyspace.util.VoiceInputManager
+import kotlinx.coroutines.launch
 
 /**
  * 컴맹 아내 맞춤형 초간단 할 일 추가 바텀시트
@@ -62,7 +69,7 @@ import com.honey.familyspace.util.DateTimeUtils
  * @param onAddTask 등록 콜백: (제목, 마감일 "YYYY-MM-DD", 매일 반복 여부)
  *                   매일 반복 선택 시 dueDate는 무시되고 매일 루틴으로 등록됨
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun AddTaskBottomSheet(
     theme: ThemeColor,
@@ -71,11 +78,18 @@ fun AddTaskBottomSheet(
 ) {
     val context = LocalContext.current
     var taskTitle by remember { mutableStateOf("") }
-    var selectedDueDate by remember { mutableStateOf(DateTimeUtils.getTodayDateString()) }
+    var selectedDueDate by remember { mutableStateOf("") }
     var isDaily by remember { mutableStateOf(false) }
     var isListening by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
+
+    val dataStore = remember { com.honey.familyspace.data.DataStoreManager(context) }
+    val scope = rememberCoroutineScope()
+    val customTags by dataStore.customTagsFlow.collectAsState(initial = emptyList())
+    var showAddTagDialog by remember { mutableStateOf(false) }
+    var newTagInput by remember { mutableStateOf("") }
+    var tagToDelete by remember { mutableStateOf<String?>(null) }
 
     // 특정 시각 소리 알람 상태
     var hasAlarm by remember { mutableStateOf(false) }
@@ -108,15 +122,6 @@ fun AddTaskBottomSheet(
     var selectedLang by remember { mutableStateOf(initialLang) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    val quickTags = listOf(
-        "🛒 마트 장보기",
-        "🏃 운동 하기",
-        "💊 병원 / 약 챙기기",
-        "🗑️ 분리수거하기",
-        "🧹 청소 / 환기",
-        "💳 관리비 / 공과금"
-    )
 
     val dateOptions = listOf(
         "오늘" to DateTimeUtils.getTodayDateString(),
@@ -278,24 +283,45 @@ fun AddTaskBottomSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 2. 자주 쓰는 1-Tap 추천 태그
-            Text("자주 쓰는 추천 태그 (터치 시 자동 완성):", fontSize = 13.sp, color = Color.Gray)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+            // 2. 자주 쓰는 1-Tap 추천 태그 (사용자 직접 등록/삭제)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                quickTags.forEach { tag ->
-                    Box(
-                        modifier = Modifier
-                            .background(Color(0xFFF5F5F5), RoundedCornerShape(12.dp))
-                            .clickable {
-                                taskTitle = tag
-                            }
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Text(text = tag, fontSize = 13.sp, color = Color(0xFF333333))
+                Text("자주 쓰는 추천 태그 (길게 눌러 삭제):", fontSize = 13.sp, color = Color.Gray)
+                TextButton(onClick = {
+                    newTagInput = ""
+                    showAddTagDialog = true
+                }) {
+                    Text("➕ 태그 추가", fontSize = 12.sp, color = Color(theme.accentHex), fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (customTags.isEmpty()) {
+                Text(
+                    text = "등록된 태그가 없습니다. [+ 태그 추가]를 눌러 나만의 태그를 만들어 보세요 🏷️",
+                    fontSize = 12.sp,
+                    color = Color.Gray.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            } else {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    customTags.forEach { tag ->
+                        Box(
+                            modifier = Modifier
+                                .background(Color(0xFFF5F5F5), RoundedCornerShape(12.dp))
+                                .combinedClickable(
+                                    onClick = { taskTitle = tag },
+                                    onLongClick = { tagToDelete = tag }
+                                )
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text(text = tag, fontSize = 13.sp, color = Color(0xFF333333))
+                        }
                     }
                 }
             }
@@ -540,5 +566,71 @@ fun AddTaskBottomSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    // 커스텀 태그 추가 다이얼로그
+    if (showAddTagDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddTagDialog = false },
+            title = { Text("자주 쓰는 태그 추가 🏷️", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("자주 입력하는 할 일 내용을 태그로 등록하세요.", fontSize = 14.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = newTagInput,
+                        onValueChange = { newTagInput = it.take(20) },
+                        placeholder = { Text("예: 💊 비타민 챙기기") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmed = newTagInput.trim()
+                        if (trimmed.isNotBlank() && trimmed !in customTags) {
+                            scope.launch {
+                                dataStore.saveCustomTags(customTags + trimmed)
+                            }
+                        }
+                        showAddTagDialog = false
+                    },
+                    enabled = newTagInput.isNotBlank()
+                ) {
+                    Text("추가", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddTagDialog = false }) {
+                    Text("취소", color = Color.Gray)
+                }
+            }
+        )
+    }
+
+    // 커스텀 태그 삭제 확인 다이얼로그
+    tagToDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { tagToDelete = null },
+            title = { Text("태그 삭제", fontWeight = FontWeight.Bold) },
+            text = { Text("'$target' 태그를 추천 목록에서 삭제할까요?", fontSize = 15.sp) },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        dataStore.saveCustomTags(customTags.filter { it != target })
+                    }
+                    tagToDelete = null
+                }) {
+                    Text("삭제", color = Color(0xFFE53935), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { tagToDelete = null }) {
+                    Text("취소", color = Color.Gray)
+                }
+            }
+        )
     }
 }

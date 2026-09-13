@@ -1,5 +1,6 @@
 package com.honey.familyspace.data
 
+import android.content.Context
 import com.honey.familyspace.model.Space
 import com.honey.familyspace.model.ThemeColor
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,16 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
             .build()
 
         private val spacesStateFlow = MutableStateFlow<List<Space>>(emptyList())
+    }
+
+    init {
+        val ctx = dataStore?.context
+        if (ctx != null && spacesStateFlow.value.isEmpty()) {
+            val cached = loadSpacesFromCache(ctx)
+            if (cached.isNotEmpty()) {
+                spacesStateFlow.value = cached
+            }
+        }
     }
 
     /**
@@ -225,10 +236,18 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
         val trimmed = newTitle.trim()
         if (trimmed.isBlank()) return@withContext Result.failure(IllegalArgumentException("방 이름을 입력해 주세요."))
 
+        // 방 이름 중복 검사
+        val duplicate = spacesStateFlow.value.any { it.id != spaceId && it.title.equals(trimmed, ignoreCase = true) }
+        if (duplicate) {
+            return@withContext Result.failure(IllegalArgumentException("같은 이름의 방이 이미 있어요. 다른 이름을 사용해 주세요."))
+        }
+
         // 로컬 즉시 반영
-        spacesStateFlow.value = spacesStateFlow.value.map {
+        val updated = spacesStateFlow.value.map {
             if (it.id == spaceId) it.copy(title = trimmed) else it
         }
+        spacesStateFlow.value = updated
+        dataStore?.context?.let { saveSpacesToCache(it, updated) }
 
         try {
             val jsonBody = JSONObject().apply {
@@ -264,12 +283,14 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
             val list = mutableListOf<Space>()
             for (i in 0 until arr.length()) {
                 val s = arr.getJSONObject(i)
+                val mCount = s.optInt("member_count", 1)
+                val memberUids = if (mCount >= 2) listOf(myUid, "partner") else listOf(myUid)
                 list.add(
                     Space(
                         id = s.getString("id"),
                         title = s.getString("title"),
                         themeColor = s.optString("theme_color", "CORAL"),
-                        memberUids = listOf(myUid),
+                        memberUids = memberUids,
                         createdBy = s.optString("created_by", myUid),
                         createdAt = s.optLong("created_at", System.currentTimeMillis())
                     )
@@ -279,7 +300,9 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
             if (list.isNotEmpty()) {
                 val serverIds = list.map { it.id }.toSet()
                 val locals = spacesStateFlow.value.filter { it.id !in serverIds }
-                spacesStateFlow.value = list + locals
+                val merged = list + locals
+                spacesStateFlow.value = merged
+                dataStore?.context?.let { saveSpacesToCache(it, merged) }
             }
             Result.success(spacesStateFlow.value)
         } catch (e: Exception) {
@@ -313,14 +336,12 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
                 .build()
 
             val response = client.newCall(request).execute()
-            val resBody = response.body?.string() ?: ""
-
             if (!response.isSuccessful) {
-                val err = try { JSONObject(resBody).getString("error") } catch (e: Exception) { "삭제 요청에 실패했습니다." }
-                return@withContext Result.failure(IllegalStateException(err))
+                return@withContext Result.failure(IllegalStateException("삭제 요청 실패 (${response.code})"))
             }
 
-            val deleted = JSONObject(resBody).optBoolean("deleted", false)
+            val resJson = JSONObject(response.body?.string() ?: "")
+            val deleted = resJson.optBoolean("deleted", false)
             if (deleted) {
                 removeSpaceLocally(spaceId)
             }
@@ -331,7 +352,24 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
     }
 
     /**
-     * 방 삭제 요청 상태 조회 (폴링용)
+     * 1인 방 즉시 삭제 (상대방 동의 불필요)
+     */
+    suspend fun deleteSpaceImmediately(spaceId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val myUid = ensureAnonymousAuth()
+        removeSpaceLocally(spaceId)
+        try {
+            val jsonBody = JSONObject().apply { put("user_id", myUid) }
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId/delete-request")
+                .post(jsonBody.toString().toRequestBody(JSON))
+                .build()
+            client.newCall(request).execute()
+        } catch (e: Exception) {}
+        Result.success(Unit)
+    }
+
+    /**
+     * 상대방의 방 삭제 요청 여부 및 내 요청 상태 확인
      */
     suspend fun getDeleteRequestStatus(spaceId: String): Result<SpaceDeleteStatus> = withContext(Dispatchers.IO) {
         val myUid = ensureAnonymousAuth()
@@ -353,7 +391,7 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
                 SpaceDeleteStatus(
                     myRequested = json.optBoolean("my_requested", false),
                     otherRequested = json.optBoolean("other_requested", false),
-                    memberCount = json.optInt("member_count", 0)
+                    memberCount = json.optInt("member_count", 1)
                 )
             )
         } catch (e: Exception) {
@@ -378,10 +416,12 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
     }
 
     /**
-     * 삭제된 방을 로컬 목록에서 즉시 제거
+     * 삭제된 방을 로컬 목록에서 즉시 제거 및 캐시 갱신
      */
     fun removeSpaceLocally(spaceId: String) {
-        spacesStateFlow.value = spacesStateFlow.value.filterNot { it.id == spaceId }
+        val updated = spacesStateFlow.value.filterNot { it.id == spaceId }
+        spacesStateFlow.value = updated
+        dataStore?.context?.let { saveSpacesToCache(it, updated) }
     }
 
     /**
@@ -389,5 +429,51 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
      */
     fun observeMySpaces(): Flow<List<Space>> {
         return spacesStateFlow.asStateFlow()
+    }
+
+    private fun saveSpacesToCache(context: Context, list: List<Space>) {
+        try {
+            val sp = context.getSharedPreferences("todak_cache", Context.MODE_PRIVATE)
+            val arr = JSONArray()
+            for (s in list) {
+                val obj = JSONObject().apply {
+                    put("id", s.id)
+                    put("title", s.title)
+                    put("theme_color", s.themeColor)
+                    put("member_count", s.memberCount)
+                    put("created_by", s.createdBy)
+                    put("created_at", s.createdAt)
+                }
+                arr.put(obj)
+            }
+            sp.edit().putString("spaces_json", arr.toString()).apply()
+        } catch (e: Exception) {}
+    }
+
+    private fun loadSpacesFromCache(context: Context): List<Space> {
+        return try {
+            val sp = context.getSharedPreferences("todak_cache", Context.MODE_PRIVATE)
+            val jsonStr = sp.getString("spaces_json", null) ?: return emptyList()
+            val arr = JSONArray(jsonStr)
+            val list = mutableListOf<Space>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val mCount = obj.optInt("member_count", 1)
+                val memberUids = if (mCount >= 2) listOf("uid1", "uid2") else listOf("uid1")
+                list.add(
+                    Space(
+                        id = obj.getString("id"),
+                        title = obj.getString("title"),
+                        themeColor = obj.optString("theme_color", "CORAL"),
+                        memberUids = memberUids,
+                        createdBy = obj.optString("created_by", ""),
+                        createdAt = obj.optLong("created_at", System.currentTimeMillis())
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 }

@@ -1,5 +1,6 @@
 package com.honey.familyspace.data
 
+import android.content.Context
 import com.honey.familyspace.model.DailyRoutine
 import com.honey.familyspace.model.Task
 import com.honey.familyspace.util.DateTimeUtils
@@ -13,6 +14,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -45,13 +47,15 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
 
     private fun getTaskFlow(spaceId: String): MutableStateFlow<List<Task>> {
         return tasksMap.getOrPut(spaceId) {
-            MutableStateFlow(emptyList())
+            val cached = dataStore?.context?.let { loadTasksFromCache(it, spaceId) } ?: emptyList()
+            MutableStateFlow(cached)
         }
     }
 
     private fun getRoutineFlow(spaceId: String): MutableStateFlow<List<DailyRoutine>> {
         return routinesMap.getOrPut(spaceId) {
-            MutableStateFlow(emptyList())
+            val cached = dataStore?.context?.let { loadRoutinesFromCache(it, spaceId) } ?: emptyList()
+            MutableStateFlow(cached)
         }
     }
 
@@ -287,6 +291,7 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
             }
 
             flow.value = syncedList
+            dataStore?.context?.let { saveTasksToCache(it, spaceId, syncedList) }
 
             // 위젯 및 상단바 알림 실시간 갱신
             dataStore?.context?.let { ctx ->
@@ -453,7 +458,9 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
             // 로컬에만 있고 서버에 없는 루틴(전송 실패분)은 앞에 보존
             val serverIds = synced.map { it.id }.toSet()
             val localsOnly = localList.filter { it.id !in serverIds }
-            flow.value = localsOnly + synced
+            val mergedRoutines = localsOnly + synced
+            flow.value = mergedRoutines
+            dataStore?.context?.let { saveRoutinesToCache(it, spaceId, mergedRoutines) }
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -464,6 +471,7 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
     suspend fun deleteRoutine(spaceId: String, routineId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val flow = getRoutineFlow(spaceId)
         flow.value = flow.value.filter { it.id != routineId }
+        dataStore?.context?.let { saveRoutinesToCache(it, spaceId, flow.value) }
 
         try {
             val request = Request.Builder()
@@ -474,5 +482,105 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         } catch (e: Exception) {}
 
         Result.success(Unit)
+    }
+
+    private fun saveTasksToCache(context: Context, spaceId: String, list: List<Task>) {
+        try {
+            val sp = context.getSharedPreferences("todak_cache", Context.MODE_PRIVATE)
+            val arr = JSONArray()
+            for (t in list) {
+                val obj = JSONObject().apply {
+                    put("id", t.id)
+                    put("spaceId", t.spaceId)
+                    put("title", t.title)
+                    put("dueDate", t.dueDate)
+                    put("isCompleted", t.isCompleted)
+                    put("createdAt", t.createdAt)
+                    put("alarmTime", t.alarmTime ?: "")
+                    put("hasAlarm", t.hasAlarm)
+                }
+                arr.put(obj)
+            }
+            sp.edit().putString("tasks_${spaceId}", arr.toString()).apply()
+        } catch (e: Exception) {}
+    }
+
+    private fun loadTasksFromCache(context: Context, spaceId: String): List<Task> {
+        return try {
+            val sp = context.getSharedPreferences("todak_cache", Context.MODE_PRIVATE)
+            val jsonStr = sp.getString("tasks_${spaceId}", null) ?: return emptyList()
+            val arr = JSONArray(jsonStr)
+            val list = mutableListOf<Task>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    Task(
+                        id = obj.getString("id"),
+                        spaceId = obj.optString("spaceId", spaceId),
+                        title = obj.getString("title"),
+                        dueDate = obj.optString("dueDate", ""),
+                        isCompleted = obj.optBoolean("isCompleted", false),
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                        alarmTime = obj.optString("alarmTime", "").takeIf { it.isNotBlank() },
+                        hasAlarm = obj.optBoolean("hasAlarm", false)
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveRoutinesToCache(context: Context, spaceId: String, list: List<DailyRoutine>) {
+        try {
+            val sp = context.getSharedPreferences("todak_cache", Context.MODE_PRIVATE)
+            val arr = JSONArray()
+            for (r in list) {
+                val obj = JSONObject().apply {
+                    put("id", r.id)
+                    put("spaceId", r.spaceId)
+                    put("title", r.title)
+                    put("iconType", r.iconType)
+                    put("lastCompletedDate", r.lastCompletedDate)
+                    put("lastCompletedTime", r.lastCompletedTime)
+                    put("partnerCompletedDate", r.partnerCompletedDate)
+                    put("partnerCompletedTime", r.partnerCompletedTime)
+                    put("targetTime", r.targetTime)
+                    put("createdAt", r.createdAt)
+                }
+                arr.put(obj)
+            }
+            sp.edit().putString("routines_${spaceId}", arr.toString()).apply()
+        } catch (e: Exception) {}
+    }
+
+    private fun loadRoutinesFromCache(context: Context, spaceId: String): List<DailyRoutine> {
+        return try {
+            val sp = context.getSharedPreferences("todak_cache", Context.MODE_PRIVATE)
+            val jsonStr = sp.getString("routines_${spaceId}", null) ?: return emptyList()
+            val arr = JSONArray(jsonStr)
+            val list = mutableListOf<DailyRoutine>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    DailyRoutine(
+                        id = obj.getString("id"),
+                        spaceId = obj.optString("spaceId", spaceId),
+                        title = obj.getString("title"),
+                        iconType = obj.optString("iconType", "PILL"),
+                        lastCompletedDate = obj.optString("lastCompletedDate", ""),
+                        lastCompletedTime = obj.optString("lastCompletedTime", ""),
+                        partnerCompletedDate = obj.optString("partnerCompletedDate", ""),
+                        partnerCompletedTime = obj.optString("partnerCompletedTime", ""),
+                        targetTime = obj.optString("targetTime", "08:30"),
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 }

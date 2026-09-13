@@ -19,6 +19,8 @@ class DataStoreManager(val context: Context) {
     companion object {
         private val KEY_ACTIVE_SPACE_ID = stringPreferencesKey("active_space_id")
         private val KEY_USER_NICKNAME = stringPreferencesKey("user_nickname")
+        private val KEY_PARTNER_NICKNAME = stringPreferencesKey("partner_nickname")
+        private val KEY_CUSTOM_TAGS = stringPreferencesKey("custom_quick_tags")
         private val KEY_USER_ID = stringPreferencesKey("user_id")
         private val KEY_REMINDER_INTERVAL_HOURS = androidx.datastore.preferences.core.intPreferencesKey("reminder_interval_hours")
         private val KEY_REMINDER_NIGHT_MUTE = androidx.datastore.preferences.core.booleanPreferencesKey("reminder_night_mute")
@@ -80,18 +82,42 @@ class DataStoreManager(val context: Context) {
     }
 
     /**
-     * 사용자 닉네임 스트림 (기본값: "나")
+     * 내 애칭 스트림 (기본값: "나")
      */
     val userNicknameFlow: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_USER_NICKNAME] ?: "나"
     }
 
-    /**
-     * 사용자 닉네임 저장
-     */
     suspend fun setUserNickname(nickname: String) {
         context.dataStore.edit { prefs ->
             prefs[KEY_USER_NICKNAME] = nickname
+        }
+    }
+
+    /**
+     * 상대방 애칭 스트림 (기본값: "")
+     */
+    val partnerNicknameFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_PARTNER_NICKNAME] ?: ""
+    }
+
+    suspend fun setPartnerNickname(nickname: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_PARTNER_NICKNAME] = nickname
+        }
+    }
+
+    /**
+     * 사용자 직접 등록 태그 목록 (기본값: 빈 목록)
+     */
+    val customTagsFlow: Flow<List<String>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[KEY_CUSTOM_TAGS] ?: ""
+        if (raw.isBlank()) emptyList() else raw.split("\n").filter { it.isNotBlank() }
+    }
+
+    suspend fun saveCustomTags(tags: List<String>) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_CUSTOM_TAGS] = tags.joinToString("\n")
         }
     }
 }
