@@ -515,9 +515,9 @@ fun MainScreen(
                 task = taskToEdit,
                 theme = currentTheme,
                 onDismiss = { editingTask = null },
-                onUpdateTask = { newTitle, newDueDate ->
+                onUpdateTask = { newTitle, newDueDate, newAlarmTime, newHasAlarm ->
                     scope.launch {
-                        taskRepo.updateTask(currentSpace.id, taskToEdit.id, newTitle, newDueDate)
+                        taskRepo.updateTask(currentSpace.id, taskToEdit.id, newTitle, newDueDate, newAlarmTime, newHasAlarm)
                         OngoingNotificationManager.updateOngoingNotification(context)
                     }
                 },
@@ -536,14 +536,14 @@ fun MainScreen(
         AddTaskBottomSheet(
             theme = currentTheme,
             onDismiss = { showAddSheet = false },
-            onAddTask = { title, dueDate, isDaily ->
+            onAddTask = { title, dueDate, isDaily, alarmTime, hasAlarm ->
                 scope.launch {
                     if (isDaily) {
                         // 매일 반복 루틴으로 등록 (나와 상대 각각 체크)
                         taskRepo.addRoutine(currentSpace.id, title)
                         taskRepo.syncRoutinesFromServer(currentSpace.id)
                     } else {
-                        taskRepo.addTask(currentSpace.id, title, dueDate)
+                        taskRepo.addTask(currentSpace.id, title, dueDate, alarmTime, hasAlarm)
                     }
                     OngoingNotificationManager.updateOngoingNotification(context)
                 }
@@ -1028,19 +1028,45 @@ private fun TaskCardItem(
                     textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None
                 )
 
-                if (badge.label.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (task.dueDate.isNotBlank() && !task.isCompleted) {
-                            // 뱃지에 실제 마감 날짜를 함께 표시 (예: "오늘 마감 · 9월 12일 (토)")
-                            "${badge.label} · ${DateTimeUtils.formatKoreanDate(task.dueDate)}"
-                        } else {
-                            badge.label
-                        },
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(badge.badgeColorHex)
-                    )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (badge.label.isNotBlank()) {
+                        Text(
+                            text = if (task.dueDate.isNotBlank() && !task.isCompleted) {
+                                "${badge.label} · ${DateTimeUtils.formatKoreanDate(task.dueDate)}"
+                            } else {
+                                badge.label
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(badge.badgeColorHex)
+                        )
+                    }
+
+                    // 소리 알람이 켜져 있는 경우 알람 시각 뱃지 표시
+                    if (task.hasAlarm && !task.alarmTime.isNullOrBlank() && !task.isCompleted) {
+                        if (badge.label.isNotBlank()) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                        val timeParts = task.alarmTime.split(":")
+                        val h = timeParts.getOrNull(0)?.toIntOrNull() ?: 10
+                        val m = timeParts.getOrNull(1)?.toIntOrNull() ?: 0
+                        val amPm = if (h < 12) "오전" else "오후"
+                        val displayH = if (h % 12 == 0) 12 else h % 12
+                        val alarmStr = "$amPm $displayH:${String.format(java.util.Locale.KOREA, "%02d", m)}"
+                        Surface(
+                            color = Color(theme.accentHex).copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "⏰ $alarmStr",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(theme.accentHex),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
             }
         }

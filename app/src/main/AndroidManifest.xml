@@ -20,10 +20,19 @@
     <!-- 앱 내 원터치 자동 업데이트 설치 권한 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- Android 11+ 구글 음성 인식 엔진 서비스 패키지 가시성 쿼리 -->
+    <!-- 정확한 시각 소리 알람 (특정 시각 모닝콜/약 먹기 등 알람용) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- 알람 시각 꺼진 화면 깨우기 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Android 11+ 구글 음성 인식 서비스 및 다이얼로그 패키지 가시성 쿼리 -->
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
     </queries>
 
@@ -84,6 +93,24 @@
                 <action android:name="com.honey.familyspace.ACTION_TRIGGER_REMINDER" />
             </intent-filter>
         </receiver>
+
+        <!-- 특정 시각 소리 알람 브로드캐스트 리시버 -->
+        <receiver
+            android:name=".notification.TaskAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.honey.familyspace.ACTION_TASK_ALARM" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 특정 시각 소리 알람 전체화면 액티비티 (잠금화면 위 노출, 알람 끄기 UI) -->
+        <activity
+            android:name=".ui.TaskAlarmActivity"
+            android:exported="false"
+            android:theme="@style/Theme.FamilySpaceTodo"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true"
+            android:launchMode="singleTop" />
 
         <!-- 다운로드된 APK 설치를 위한 FileProvider -->
         <provider

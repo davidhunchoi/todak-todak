@@ -62,7 +62,13 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         return getTaskFlow(spaceId).asStateFlow()
     }
 
-    suspend fun addTask(spaceId: String, title: String, dueDate: String): Result<Task> = withContext(Dispatchers.IO) {
+    suspend fun addTask(
+        spaceId: String,
+        title: String,
+        dueDate: String,
+        alarmTime: String? = null,
+        hasAlarm: Boolean = false
+    ): Result<Task> = withContext(Dispatchers.IO) {
         val taskId = UUID.randomUUID().toString()
         val newTask = Task(
             id = taskId,
@@ -70,12 +76,21 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
             title = title.trim(),
             dueDate = dueDate.trim(),
             isCompleted = false,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            alarmTime = alarmTime,
+            hasAlarm = hasAlarm
         )
 
         // 로컬 즉각 반영 (0.1초 반응)
         val flow = getTaskFlow(spaceId)
         flow.value = listOf(newTask) + flow.value
+
+        // 특정 시각 소리 알람 예약
+        dataStore?.context?.let { ctx ->
+            if (hasAlarm) {
+                com.honey.familyspace.notification.TaskAlarmScheduler.scheduleTaskAlarm(ctx, newTask)
+            }
+        }
 
         // 백그라운드 서버 전송
         try {
@@ -83,6 +98,8 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
                 put("title", title)
                 put("due_date", dueDate)
                 put("user_id", myUserId())
+                put("alarm_time", alarmTime ?: "")
+                put("has_alarm", if (hasAlarm) 1 else 0)
             }
             val request = Request.Builder()
                 .url("$BASE_URL/api/spaces/$spaceId/tasks")
@@ -97,9 +114,26 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
     suspend fun toggleTask(spaceId: String, taskId: String, currentStatus: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         val newStatus = !currentStatus
         val flow = getTaskFlow(spaceId)
+        var toggledTask: Task? = null
         flow.value = flow.value.map {
-            if (it.id == taskId) it.copy(isCompleted = newStatus, completedAt = if (newStatus) System.currentTimeMillis() else null)
-            else it
+            if (it.id == taskId) {
+                val updated = it.copy(isCompleted = newStatus, completedAt = if (newStatus) System.currentTimeMillis() else null)
+                toggledTask = updated
+                updated
+            } else it
+        }
+
+        // 완료 상태가 되면 알람 자동 취소
+        dataStore?.context?.let { ctx ->
+            if (newStatus) {
+                com.honey.familyspace.notification.TaskAlarmScheduler.cancelTaskAlarm(ctx, taskId)
+            } else {
+                toggledTask?.let { task ->
+                    if (task.hasAlarm) {
+                        com.honey.familyspace.notification.TaskAlarmScheduler.scheduleTaskAlarm(ctx, task)
+                    }
+                }
+            }
         }
 
         try {
@@ -116,17 +150,44 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         Result.success(Unit)
     }
 
-    suspend fun updateTask(spaceId: String, taskId: String, newTitle: String, newDueDate: String): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun updateTask(
+        spaceId: String,
+        taskId: String,
+        newTitle: String,
+        newDueDate: String,
+        newAlarmTime: String? = null,
+        newHasAlarm: Boolean = false
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         val flow = getTaskFlow(spaceId)
+        var updatedTask: Task? = null
         flow.value = flow.value.map {
-            if (it.id == taskId) it.copy(title = newTitle, dueDate = newDueDate)
-            else it
+            if (it.id == taskId) {
+                val updated = it.copy(
+                    title = newTitle,
+                    dueDate = newDueDate,
+                    alarmTime = newAlarmTime,
+                    hasAlarm = newHasAlarm
+                )
+                updatedTask = updated
+                updated
+            } else it
+        }
+
+        // 알람 스케줄 갱신
+        dataStore?.context?.let { ctx ->
+            if (newHasAlarm && updatedTask != null) {
+                com.honey.familyspace.notification.TaskAlarmScheduler.scheduleTaskAlarm(ctx, updatedTask!!)
+            } else {
+                com.honey.familyspace.notification.TaskAlarmScheduler.cancelTaskAlarm(ctx, taskId)
+            }
         }
 
         try {
             val jsonBody = JSONObject().apply {
                 put("title", newTitle)
                 put("due_date", newDueDate)
+                put("alarm_time", newAlarmTime ?: "")
+                put("has_alarm", if (newHasAlarm) 1 else 0)
             }
             val request = Request.Builder()
                 .url("$BASE_URL/api/spaces/$spaceId/tasks/$taskId")
@@ -141,6 +202,11 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
     suspend fun deleteTask(spaceId: String, taskId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val flow = getTaskFlow(spaceId)
         flow.value = flow.value.filter { it.id != taskId }
+
+        // 삭제된 할 일의 알람 취소
+        dataStore?.context?.let { ctx ->
+            com.honey.familyspace.notification.TaskAlarmScheduler.cancelTaskAlarm(ctx, taskId)
+        }
 
         try {
             val request = Request.Builder()

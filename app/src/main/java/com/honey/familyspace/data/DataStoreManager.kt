@@ -14,7 +14,7 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "fa
 /**
  * 사용자 기기 로컬 설정 저장소 (Jetpack DataStore 기반)
  */
-class DataStoreManager(private val context: Context) {
+class DataStoreManager(val context: Context) {
 
     companion object {
         private val KEY_ACTIVE_SPACE_ID = stringPreferencesKey("active_space_id")

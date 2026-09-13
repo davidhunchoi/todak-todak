@@ -178,6 +178,8 @@ def migrate_schema_columns(db):
         ("invites", "expires_at", "ALTER TABLE invites ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0"),
         ("tasks", "created_by", "ALTER TABLE tasks ADD COLUMN created_by TEXT"),
         ("tasks", "due_date", "ALTER TABLE tasks ADD COLUMN due_date TEXT"),
+        ("tasks", "alarm_time", "ALTER TABLE tasks ADD COLUMN alarm_time TEXT DEFAULT ''"),
+        ("tasks", "has_alarm", "ALTER TABLE tasks ADD COLUMN has_alarm INTEGER NOT NULL DEFAULT 0"),
         ("routines", "icon_type", "ALTER TABLE routines ADD COLUMN icon_type TEXT NOT NULL DEFAULT 'PILL'"),
         ("routines", "target_time", "ALTER TABLE routines ADD COLUMN target_time TEXT DEFAULT '08:30'"),
         ("routines", "last_completed_date", "ALTER TABLE routines ADD COLUMN last_completed_date TEXT DEFAULT ''"),
@@ -821,7 +823,9 @@ def get_tasks(space_id):
                 "id": _row_get(r, "id", 0),
                 "title": _row_get(r, "title", 2),
                 "due_date": _row_get(r, "due_date", 3),
-                "is_completed": bool(_row_get(r, "is_completed", 4))
+                "is_completed": bool(_row_get(r, "is_completed", 4)),
+                "alarm_time": _row_get(r, "alarm_time", None) or "",
+                "has_alarm": bool(_row_get(r, "has_alarm", 0))
             })
         return jsonify({"tasks": tasks}), 200
     finally:
@@ -839,13 +843,15 @@ def add_task(space_id):
     task_id = str(uuid.uuid4())
     due_date = data.get("due_date", "")
     user_id = data.get("user_id", "")
+    alarm_time = data.get("alarm_time", "")
+    has_alarm = int(data.get("has_alarm", 0))
     now_ms = int(time.time() * 1000)
 
     db = get_db()
     try:
         _q(db, 
-            "INSERT INTO tasks (id, space_id, title, due_date, is_completed, created_by, created_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
-            (task_id, space_id, title, due_date, user_id, now_ms)
+            "INSERT INTO tasks (id, space_id, title, due_date, is_completed, created_by, created_at, alarm_time, has_alarm) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)",
+            (task_id, space_id, title, due_date, user_id, now_ms, alarm_time, has_alarm)
         )
         _db_commit(db)
 
@@ -855,7 +861,9 @@ def add_task(space_id):
                 "space_id": space_id,
                 "title": title,
                 "due_date": due_date,
-                "is_completed": False
+                "is_completed": False,
+                "alarm_time": alarm_time,
+                "has_alarm": bool(has_alarm)
             }
         }), 201
     finally:
@@ -878,9 +886,11 @@ def update_or_toggle_task(space_id, task_id):
         if "title" in data:
             title = data.get("title", "").strip()
             due_date = data.get("due_date", "")
+            alarm_time = data.get("alarm_time", "")
+            has_alarm = int(data.get("has_alarm", 0))
             _q(db, 
-                "UPDATE tasks SET title = ?, due_date = ? WHERE id = ? AND space_id = ?",
-                (title, due_date, task_id, space_id)
+                "UPDATE tasks SET title = ?, due_date = ?, alarm_time = ?, has_alarm = ? WHERE id = ? AND space_id = ?",
+                (title, due_date, alarm_time, has_alarm, task_id, space_id)
             )
         _db_commit(db)
         return jsonify({"message": "수정되었습니다."}), 200
@@ -1073,8 +1083,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 8
-CURRENT_APP_VERSION_NAME = "1.3.4"
+CURRENT_APP_VERSION_CODE = 9
+CURRENT_APP_VERSION_NAME = "1.3.5"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1085,7 +1095,7 @@ def get_app_version():
         # 고정 자산명: 구버전 앱(app-debug.apk 링크 내장) 호환을 위해 폴백 URL도 함께 제공
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk",
-        "changelog": "🎉 v1.3.4\n- 세련된 신규 모던 앱 아이콘 적용 (포근한 우리 집 & 듀오 하트)\n- 방 생성 시 초기 예제 완전 제거 (깨끗한 첫 시작)\n- 화면 상단/하단에 현재 설치된 앱 버전 실시간 표시\n- 최신 APK 다운로드 직통 리다이렉트 개선"
+        "changelog": "🎉 v1.3.5\n- ⏰ 특정 시각 소리 알람 신규 탑재 (모닝콜/약 챙기기 알람 소리 & 끄기)\n- 🎙️ 구글 공식 고성능 신경망 음성인식 다이얼로그 연동 (인식률 95%+)\n- 할 일 카드에 알람 시각 뱃지(⏰ 오전 10:00 등) 표시"
     }), 200
 
 

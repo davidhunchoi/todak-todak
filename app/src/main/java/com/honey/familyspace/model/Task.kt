@@ -24,7 +24,9 @@ data class Task(
     val isCompleted: Boolean = false,
     val completedAt: Long? = null,
     val createdBy: String = "",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val alarmTime: String? = null, // "HH:mm" 형식 (예: "10:00")
+    val hasAlarm: Boolean = false   // 특정 시각 소리 알람 활성화 여부
 ) {
     /**
      * 마감 상태에 따른 간결한 뱃지 텍스트 반환

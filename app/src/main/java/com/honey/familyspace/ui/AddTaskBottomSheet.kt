@@ -30,6 +30,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import android.app.Activity
+import android.app.TimePickerDialog
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -60,7 +67,7 @@ import com.honey.familyspace.util.DateTimeUtils
 fun AddTaskBottomSheet(
     theme: ThemeColor,
     onDismiss: () -> Unit,
-    onAddTask: (title: String, dueDate: String, isDaily: Boolean) -> Unit
+    onAddTask: (title: String, dueDate: String, isDaily: Boolean, alarmTime: String?, hasAlarm: Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var taskTitle by remember { mutableStateOf("") }
@@ -69,6 +76,26 @@ fun AddTaskBottomSheet(
     var isListening by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
+
+    // 특정 시각 소리 알람 상태
+    var hasAlarm by remember { mutableStateOf(false) }
+    var alarmHour by remember { mutableStateOf(10) }
+    var alarmMinute by remember { mutableStateOf(0) }
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    // 구글 공식 신경망 음성 인식 다이얼로그 런처 (정확도 95%+)
+    val googleSpeechLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val spokenText = matches?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                taskTitle = spokenText
+                errorMessage = null
+            }
+        }
+    }
 
     // 오늘/내일/기한없음 외의 날짜가 캘린더로 선택되었는지 여부
     val isCustomDateSelected = selectedDueDate.isNotBlank() &&
@@ -174,29 +201,34 @@ fun AddTaskBottomSheet(
 
                 Spacer(modifier = Modifier.width(10.dp))
 
-                // 커다란 마이크 / 녹음 중지(■) 토글 버튼
+                // 커다란 마이크 / 녹음 토글 버튼 (구글 공식 고성능 신경망 음성인식 다이얼로그 연동)
                 IconButton(
                     onClick = {
-                        if (isListening) {
-                            voiceManager.stopListening()
-                            isListening = false
-                        } else {
-                            isListening = true
-                            errorMessage = null
-                            voiceManager.startListening(
-                                languageCode = selectedLang,
-                                onPartialResult = { partialText ->
-                                    taskTitle = partialText
-                                },
-                                onResult = { spokenText ->
-                                    isListening = false
-                                    taskTitle = spokenText
-                                },
-                                onError = { err ->
-                                    isListening = false
-                                    errorMessage = err
-                                }
-                            )
+                        errorMessage = null
+                        try {
+                            val prompt = if (selectedLang == "en-US") "Please speak your task 🎙️" else "할 일을 말씀해 주세요 🎙️"
+                            val intent = VoiceInputManager.createGoogleSpeechIntent(prompt)
+                            googleSpeechLauncher.launch(intent)
+                        } catch (_: Exception) {
+                            // 구글 공식 다이얼로그 미설치 기기 시 내장 음성인식 엔진으로 안전하게 폴백
+                            if (isListening) {
+                                voiceManager.stopListening()
+                                isListening = false
+                            } else {
+                                isListening = true
+                                voiceManager.startListening(
+                                    languageCode = selectedLang,
+                                    onPartialResult = { partialText -> taskTitle = partialText },
+                                    onResult = { spokenText ->
+                                        isListening = false
+                                        taskTitle = spokenText
+                                    },
+                                    onError = { err ->
+                                        isListening = false
+                                        errorMessage = err
+                                    }
+                                )
+                            }
                         }
                     },
                     modifier = Modifier
@@ -352,9 +384,89 @@ fun AddTaskBottomSheet(
                     )
                 }
 
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 3-1. 특정 시각 소리 알람 설정 (모닝콜/약 먹기 등 지정 시각 정각 소리 알람)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            color = if (hasAlarm) Color(theme.accentHex).copy(alpha = 0.08f) else Color(0xFFF7F7F7),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("⏰", fontSize = 20.sp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "특정 시각 소리 알람",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(theme.textColor)
+                            )
+                            val amPm = if (alarmHour < 12) "오전" else "오후"
+                            val displayHour = if (alarmHour % 12 == 0) 12 else alarmHour % 12
+                            val formattedTime = "$amPm $displayHour:${String.format(java.util.Locale.KOREA, "%02d", alarmMinute)}"
+                            Text(
+                                text = if (hasAlarm) "$formattedTime 모닝콜처럼 소리 울림" else "정해진 시간에 소리로 깨워줘요",
+                                fontSize = 12.sp,
+                                color = if (hasAlarm) Color(theme.accentHex) else Color.Gray,
+                                fontWeight = if (hasAlarm) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                        }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (hasAlarm) {
+                            TextButton(onClick = { showTimePicker = true }) {
+                                Text("시간 변경", fontSize = 13.sp, color = Color(theme.accentHex), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Switch(
+                            checked = hasAlarm,
+                            onCheckedChange = { checked ->
+                                hasAlarm = checked
+                                if (checked) {
+                                    showTimePicker = true
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(theme.accentHex)
+                            )
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(24.dp))
             } else {
                 Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // 시:분 선택 타임피커
+            if (showTimePicker) {
+                TimePickerDialog(
+                    context,
+                    { _, h, m ->
+                        alarmHour = h
+                        alarmMinute = m
+                        hasAlarm = true
+                        showTimePicker = false
+                    },
+                    alarmHour,
+                    alarmMinute,
+                    false
+                ).apply {
+                    setOnDismissListener { showTimePicker = false }
+                    show()
+                }
             }
 
             // 캘린더 데이트피커
@@ -388,7 +500,10 @@ fun AddTaskBottomSheet(
             Button(
                 onClick = {
                     if (taskTitle.isNotBlank()) {
-                        onAddTask(taskTitle, selectedDueDate, isDaily)
+                        val alarmTimeStr = if (hasAlarm && !isDaily) {
+                            String.format(java.util.Locale.KOREA, "%02d:%02d", alarmHour, alarmMinute)
+                        } else null
+                        onAddTask(taskTitle, selectedDueDate, isDaily, alarmTimeStr, hasAlarm && !isDaily)
                         voiceManager.destroy()
                         onDismiss()
                     }
