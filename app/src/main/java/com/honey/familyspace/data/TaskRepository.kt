@@ -3,6 +3,7 @@ package com.honey.familyspace.data
 import com.honey.familyspace.model.DailyRoutine
 import com.honey.familyspace.model.Task
 import com.honey.familyspace.util.DateTimeUtils
+import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow

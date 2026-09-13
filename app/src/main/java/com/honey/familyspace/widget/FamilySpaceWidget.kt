@@ -142,10 +142,6 @@ class FamilySpaceWidget : GlanceAppWidget() {
 
             Spacer(modifier = GlanceModifier.height(10.dp))
 
-            val openAppIntent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-
             // 2. 안심 루틴 카드 (터치 시 안전하게 앱 열기)
             if (routine != null) {
                 val isDone = routine.isCompletedToday(todayString)
@@ -163,7 +159,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
                         .background(routineBg)
                         .cornerRadius(14.dp)
                         .padding(horizontal = 12.dp, vertical = 10.dp)
-                        .clickable(actionStartActivity(openAppIntent)),
+                        .clickable(actionStartActivity<MainActivity>()),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -185,7 +181,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
                     modifier = GlanceModifier
                         .fillMaxWidth()
                         .defaultWeight()
-                        .clickable(actionStartActivity(openAppIntent)),
+                        .clickable(actionStartActivity<MainActivity>()),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -203,7 +199,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
                         .defaultWeight()
                 ) {
                     items(tasks.take(3)) { task ->
-                        TaskItemRow(task, theme, openAppIntent)
+                        TaskItemRow(task, theme)
                         Spacer(modifier = GlanceModifier.height(6.dp))
                     }
                 }
@@ -218,7 +214,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
             ) {
                 Box(
                     modifier = GlanceModifier
-                        .clickable(actionStartActivity(openAppIntent))
+                        .clickable(actionStartActivity<MainActivity>())
                         .background(Color(theme.accentHex))
                         .cornerRadius(12.dp)
                         .padding(horizontal = 12.dp, vertical = 6.dp)
@@ -237,7 +233,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
     }
 
     @Composable
-    private fun TaskItemRow(task: Task, theme: ThemeColor, openAppIntent: Intent) {
+    private fun TaskItemRow(task: Task, theme: ThemeColor) {
         val checkIcon = if (task.isCompleted) "☑" else "☐"
         val textColor = if (task.isCompleted) Color(0xFF9E9E9E) else Color(theme.textColor)
 
@@ -247,7 +243,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
                 .background(Color.White)
                 .cornerRadius(12.dp)
                 .padding(horizontal = 10.dp, vertical = 8.dp)
-                .clickable(actionStartActivity(openAppIntent)),
+                .clickable(actionStartActivity<MainActivity>()),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
