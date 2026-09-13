@@ -6,7 +6,7 @@ import sqlite3
 import traceback as _tb
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from flask import Flask, request, jsonify, send_file, redirect
+from flask import Flask, request, jsonify, send_file, redirect, render_template, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -438,7 +438,29 @@ def get_today_date_string():
 
 
 # ==========================================
-# 0. 헬스 체크 & Keep-Alive (UptimeRobot용)
+# 0. 모바일 웹 & PWA 인터페이스 (아이폰/PC 겸용)
+# ==========================================
+@app.route("/", methods=["GET"])
+@app.route("/mobile", methods=["GET"])
+def mobile_web_index():
+    """아이폰(iOS) 및 모바일 브라우저용 반응형 PWA 인터페이스"""
+    return render_template("index.html")
+
+
+@app.route("/manifest.json", methods=["GET"])
+def pwa_manifest():
+    """PWA 매니페스트 서빙"""
+    return send_from_directory(os.path.join(os.path.dirname(__file__), "static"), "manifest.json", mimetype="application/manifest+json")
+
+
+@app.route("/sw.js", methods=["GET"])
+def pwa_service_worker():
+    """PWA 서비스 워커 서빙"""
+    return send_from_directory(os.path.join(os.path.dirname(__file__), "static"), "sw.js", mimetype="application/javascript")
+
+
+# ==========================================
+# 0-1. 헬스 체크 & Keep-Alive (UptimeRobot용)
 # ==========================================
 @app.route("/health", methods=["GET"])
 @app.route("/ping", methods=["GET"])

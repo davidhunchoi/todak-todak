@@ -1,0 +1,22 @@
+{
+  "name": "토닥토닥 우리가족 챙기기",
+  "short_name": "토닥토닥",
+  "description": "소중한 가족과 함께하는 따뜻한 할 일 및 루틴 챙김 공간 🌸",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFF9F6",
+  "theme_color": "#FF6B6B",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
