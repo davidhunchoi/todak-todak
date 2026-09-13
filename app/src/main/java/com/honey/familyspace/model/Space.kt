@@ -28,4 +28,10 @@ data class Space(
      */
     val isPaired: Boolean
         get() = memberUids.size >= 2
+
+    /**
+     * 방 멤버 수 (1명: 혼자, 2명: 1:1 연결 완료)
+     */
+    val memberCount: Int
+        get() = memberUids.size
 }
