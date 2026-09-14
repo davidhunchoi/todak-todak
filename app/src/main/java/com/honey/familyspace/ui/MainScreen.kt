@@ -174,9 +174,9 @@ fun MainScreen(
     val appVersion = remember {
         try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            "v${pInfo.versionName ?: "1.3.9"}"
+            "v${pInfo.versionName ?: "1.4.0"}"
         } catch (e: Exception) {
-            "v1.3.9"
+            "v1.4.0"
         }
     }
 
@@ -199,6 +199,17 @@ fun MainScreen(
             view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             scope.launch {
                 try {
+                    // 1. 앱 최신 업데이트 실시간 확인 (앱을 껐다 켜지 않아도 새로고침 시 즉시 팝업 노출)
+                    try {
+                        val info = AppUpdateManager.checkForUpdate(context)
+                        if (info != null && info.hasUpdate) {
+                            updateInfo = info
+                        }
+                    } catch (e: Exception) {
+                        // 업데이트 체크 네트워크 오류 무시
+                    }
+
+                    // 2. 방 및 할 일 데이터 동기화
                     spaceRepo.syncSpacesFromServer()
                     mySpaces.forEach { s ->
                         taskRepo.syncTasksFromServer(s.id)
