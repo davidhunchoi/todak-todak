@@ -3,8 +3,10 @@ package com.honey.familyspace.data
 import android.content.Context
 import com.honey.familyspace.model.Space
 import com.honey.familyspace.model.ThemeColor
+import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
@@ -264,6 +266,37 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
     }
 
     /**
+     * 방 테마 색상 언제든 변경 (서버 및 로컬 즉각 동기화)
+     */
+    suspend fun updateSpaceTheme(spaceId: String, newTheme: ThemeColor): Result<Unit> = withContext(Dispatchers.IO) {
+        // 로컬 즉시 반영
+        val updated = spacesStateFlow.value.map {
+            if (it.id == spaceId) it.copy(themeColor = newTheme.name) else it
+        }
+        spacesStateFlow.value = updated
+        dataStore?.context?.let { ctx ->
+            saveSpacesToCache(ctx, updated)
+            try {
+                com.honey.familyspace.widget.FamilySpaceWidget().updateAll(ctx)
+                com.honey.familyspace.notification.OngoingNotificationManager.updateOngoingNotification(ctx)
+            } catch (e: Exception) {}
+        }
+
+        try {
+            val jsonBody = JSONObject().apply {
+                put("theme_color", newTheme.name)
+            }
+            val request = Request.Builder()
+                .url("$BASE_URL/api/spaces/$spaceId")
+                .patch(jsonBody.toString().toRequestBody(JSON))
+                .build()
+            client.newCall(request).execute()
+        } catch (e: Exception) {}
+
+        Result.success(Unit)
+    }
+
+    /**
      * 서버에서 내가 참여 중인 모든 스페이스 목록 동기화
      */
     suspend fun syncSpacesFromServer(): Result<List<Space>> = withContext(Dispatchers.IO) {
@@ -427,7 +460,7 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
     /**
      * 내가 참여 중인 모든 1:1 스페이스 목록 실시간 구독
      */
-    fun observeMySpaces(): Flow<List<Space>> {
+    fun observeMySpaces(): StateFlow<List<Space>> {
         return spacesStateFlow.asStateFlow()
     }
 

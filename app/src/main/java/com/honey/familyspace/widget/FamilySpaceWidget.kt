@@ -58,26 +58,32 @@ class FamilySpaceWidget : GlanceAppWidget() {
         val todayString = DateTimeUtils.getTodayDateString()
 
         val mySpaces = spaceRepo.observeMySpaces().firstOrNull() ?: emptyList()
-        val currentSpace = mySpaces.find { it.id == activeSpaceId } ?: mySpaces.firstOrNull()
-        val theme = currentSpace?.getTheme() ?: ThemeColor.CORAL
+        val isAllMode = (activeSpaceId == "ALL") && mySpaces.size > 1
 
-        val tasks = if (currentSpace != null) {
+        val currentSpace = if (isAllMode) null else (mySpaces.find { it.id == activeSpaceId } ?: mySpaces.firstOrNull())
+        val spaceTitle = if (isAllMode) "모든 방 (전체)" else (currentSpace?.title ?: "우리 공간")
+        val theme = if (isAllMode) ThemeColor.LAVENDER else (currentSpace?.getTheme() ?: ThemeColor.CORAL)
+
+        val tasks = if (isAllMode) {
+            taskRepo.observeAllTasks(mySpaces.map { it.id }).firstOrNull() ?: emptyList()
+        } else if (currentSpace != null) {
             taskRepo.observeTasks(currentSpace.id).firstOrNull() ?: emptyList()
         } else emptyList()
 
-        val routines = if (currentSpace != null) {
+        val routines = if (isAllMode) {
+            taskRepo.observeAllRoutines(mySpaces.map { it.id }).firstOrNull() ?: emptyList()
+        } else if (currentSpace != null) {
             taskRepo.observeRoutines(currentSpace.id).firstOrNull() ?: emptyList()
         } else emptyList()
 
         val todayTasks = tasks.filter { it.dueDate.isBlank() || it.dueDate <= todayString }
-        val routine = routines.firstOrNull()
 
         provideContent {
             WidgetContent(
                 context = context,
-                spaceTitle = currentSpace?.title ?: "우리 공간",
+                spaceTitle = spaceTitle,
                 theme = theme,
-                routine = routine,
+                routines = routines,
                 tasks = todayTasks,
                 todayString = todayString,
                 activeSpaceId = currentSpace?.id ?: ""
@@ -90,7 +96,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
         context: Context,
         spaceTitle: String,
         theme: ThemeColor,
-        routine: DailyRoutine?,
+        routines: List<DailyRoutine>,
         tasks: List<Task>,
         todayString: String,
         activeSpaceId: String
@@ -102,7 +108,7 @@ class FamilySpaceWidget : GlanceAppWidget() {
                 .cornerRadius(24.dp)
                 .padding(16.dp)
         ) {
-            // 1. 위젯 상단 헤더 (방 이름 & 남은 할 일 수)
+            // 1. 위젯 상단 헤더 (방 이름 & 남은 할 일/루틴 수)
             Row(
                 modifier = GlanceModifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -117,8 +123,10 @@ class FamilySpaceWidget : GlanceAppWidget() {
                     modifier = GlanceModifier.defaultWeight()
                 )
 
-                val uncompletedCount = tasks.count { !it.isCompleted }
-                val summaryText = if (uncompletedCount == 0) "모두 완료! 💖" else "${uncompletedCount}개 남음"
+                val uncompletedTasksCount = tasks.count { !it.isCompleted }
+                val uncompletedRoutinesCount = routines.count { !it.isCompletedToday(todayString) }
+                val totalUncompletedCount = uncompletedTasksCount + uncompletedRoutinesCount
+                val summaryText = if (totalUncompletedCount == 0) "모두 완료! 💖" else "${totalUncompletedCount}개 남음"
                 Text(
                     text = summaryText,
                     style = TextStyle(
@@ -140,39 +148,42 @@ class FamilySpaceWidget : GlanceAppWidget() {
                 )
             }
 
-            Spacer(modifier = GlanceModifier.height(10.dp))
+            Spacer(modifier = GlanceModifier.height(8.dp))
 
-            // 2. 안심 루틴 카드 (터치 시 안전하게 앱 열기)
-            if (routine != null) {
-                val isDone = routine.isCompletedToday(todayString)
-                val routineBg = if (isDone) Color(0xFFE8F5E9) else Color(theme.accentHex)
-                val routineTextColor = if (isDone) Color(0xFF2E7D32) else Color.White
-                val statusText = if (isDone) {
-                    "✅ ${routine.title}: ${routine.lastCompletedTime} 복용 완료"
-                } else {
-                    "💊 ${routine.title}: 오늘 챙기기 (앱에서 체크)"
-                }
+            // 2. 안심 루틴 카드 목록 (매일 반복 일정이 2개 이상이라도 모두 표시)
+            if (routines.isNotEmpty()) {
+                routines.forEach { routine ->
+                    val isDone = routine.isCompletedToday(todayString)
+                    val routineBg = if (isDone) Color(0xFFE8F5E9) else Color(theme.accentHex)
+                    val routineTextColor = if (isDone) Color(0xFF2E7D32) else Color.White
+                    val statusText = if (isDone) {
+                        "✅ ${routine.title}: ${routine.lastCompletedTime.ifBlank { "완료" }}"
+                    } else {
+                        "💊 ${routine.title}: 오늘 챙기기"
+                    }
 
-                Box(
-                    modifier = GlanceModifier
-                        .fillMaxWidth()
-                        .background(routineBg)
-                        .cornerRadius(14.dp)
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
-                        .clickable(actionStartActivity<MainActivity>()),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = statusText,
-                        style = TextStyle(
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = androidx.glance.unit.ColorProvider(routineTextColor)
+                    Box(
+                        modifier = GlanceModifier
+                            .fillMaxWidth()
+                            .background(routineBg)
+                            .cornerRadius(12.dp)
+                            .padding(horizontal = 10.dp, vertical = 7.dp)
+                            .clickable(actionStartActivity<MainActivity>()),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = statusText,
+                            style = TextStyle(
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = androidx.glance.unit.ColorProvider(routineTextColor)
+                            )
                         )
-                    )
-                }
+                    }
 
-                Spacer(modifier = GlanceModifier.height(10.dp))
+                    Spacer(modifier = GlanceModifier.height(4.dp))
+                }
+                Spacer(modifier = GlanceModifier.height(4.dp))
             }
 
             // 3. 오늘 할 일 리스트 (터치 시 안전하게 앱 열기 - 오작동 방지)
@@ -282,8 +293,16 @@ class RefreshWidgetActionCallback : ActionCallback {
     ) {
         val dataStore = DataStoreManager(context)
         val activeSpaceId = dataStore.activeSpaceIdFlow.firstOrNull() ?: ""
-        if (activeSpaceId.isNotBlank()) {
-            val taskRepo = TaskRepository(dataStore)
+        val spaceRepo = SpaceRepository(dataStore)
+        val mySpaces = spaceRepo.observeMySpaces().firstOrNull() ?: emptyList()
+        val taskRepo = TaskRepository(dataStore)
+
+        if (activeSpaceId == "ALL" || activeSpaceId.isBlank()) {
+            mySpaces.forEach { s ->
+                taskRepo.syncTasksFromServer(s.id)
+                taskRepo.syncRoutinesFromServer(s.id)
+            }
+        } else {
             taskRepo.syncTasksFromServer(activeSpaceId)
             taskRepo.syncRoutinesFromServer(activeSpaceId)
         }

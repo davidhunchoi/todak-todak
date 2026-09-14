@@ -1144,8 +1144,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 12
-CURRENT_APP_VERSION_NAME = "1.3.8"
+CURRENT_APP_VERSION_CODE = 13
+CURRENT_APP_VERSION_NAME = "1.3.9"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1156,7 +1156,7 @@ def get_app_version():
         # 고정 자산명: 구버전 앱(app-debug.apk 링크 내장) 호환을 위해 폴백 URL도 함께 제공
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk",
-        "changelog": "🌸 v1.3.8 맞춤형 업그레이드\n- ⚡ 0초 로컬 캐싱 (앱 실행 시 환영 화면 깜빡임 완벽 해결)\n- 💖 하단 참여 상태 표기 및 '우리 애칭' 기능 추가\n- 🏠 방 롱클릭 [수정/삭제] 통합 관리 & 1인 방 즉시 삭제 & 방 이름 중복 방지\n- 📂 지난 완료 기록 접기/펼치기 아코디언 추가\n- 📱 홈 화면 위젯 전체 할 일 표시 (3개 제한 해제)\n- 🏷️ 추천 태그 직접 등록/수정/삭제 & 마감일 기본값 '기한 없음'\n- ✅ 매일 루틴 완료 버튼 문구 간소화 ('완료했어요')"
+        "changelog": "🌸 v1.3.9 업데이트\n- ⏰ 기한 초과 카드 강조 (은은한 로즈 틴트 파스텔 배경 & 핑크 테두리)"
     }), 200
 
 

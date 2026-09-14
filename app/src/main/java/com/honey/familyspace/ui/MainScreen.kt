@@ -3,6 +3,7 @@ package com.honey.familyspace.ui
 import android.content.Intent
 import android.view.HapticFeedbackConstants
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -78,6 +79,7 @@ import com.honey.familyspace.model.DailyRoutine
 import com.honey.familyspace.model.Space
 import com.honey.familyspace.model.Task
 import com.honey.familyspace.model.ThemeColor
+import com.honey.familyspace.model.DueBadge
 import com.honey.familyspace.notification.OngoingNotificationManager
 import com.honey.familyspace.util.DateTimeUtils
 import kotlinx.coroutines.delay
@@ -98,13 +100,13 @@ fun MainScreen(
     val view = LocalView.current
     val scope = rememberCoroutineScope()
 
-    val mySpaces by spaceRepo.observeMySpaces().collectAsState(initial = emptyList())
+    val mySpaces by spaceRepo.observeMySpaces().collectAsState()
     val activeSpaceId by dataStore.activeSpaceIdFlow.collectAsState(initial = null)
     val myNickname by dataStore.myNicknameFlow.collectAsState(initial = "나")
     val partnerNickname by dataStore.partnerNicknameFlow.collectAsState(initial = "짝꿍")
 
-    // 초기 로딩 플래그 (Cold Start 시 환영 화면이 번쩍 뜨는 것 방지)
-    var isInitialLoading by remember { mutableStateOf(true) }
+    // 초기 로딩 플래그 (로컬 캐시가 이미 있으면 즉시 화면 노출, 없으면 로딩 인디케이터)
+    var isInitialLoading by remember { mutableStateOf(mySpaces.isEmpty()) }
 
     // 지난 완료 기록 접기/펼치기 상태
     var showPastCompleted by remember { mutableStateOf(false) }
@@ -156,6 +158,10 @@ fun MainScreen(
     var singleDeleteTargetSpace by remember { mutableStateOf<Space?>(null) }
     var showSingleDeleteDialog by remember { mutableStateOf(false) }
 
+    // 방 테마 색상 변경 다이얼로그 상태
+    var showThemeDialog by remember { mutableStateOf(false) }
+    var themeTargetSpace by remember { mutableStateOf<Space?>(null) }
+
     // 방 이름 변경 다이얼로그 상태
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameTargetSpace by remember { mutableStateOf<Space?>(null) }
@@ -168,9 +174,9 @@ fun MainScreen(
     val appVersion = remember {
         try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            "v${pInfo.versionName ?: "1.3.8"}"
+            "v${pInfo.versionName ?: "1.3.9"}"
         } catch (e: Exception) {
-            "v1.3.8"
+            "v1.3.9"
         }
     }
 
@@ -209,16 +215,22 @@ fun MainScreen(
         }
     }
 
-    // 앱 실행 시 백엔드 서버에 새 버전(업데이트) 있는지 확인 및 내 방 목록 동기화
+    // 앱 실행 시 백엔드 서버에 새 버전(업데이트) 확인 및 내 방 목록 동기화 (화면 렌더링을 차단하지 않고 병렬 실행)
     LaunchedEffect(Unit) {
-        val info = AppUpdateManager.checkForUpdate(context)
-        if (info != null && info.hasUpdate) {
-            updateInfo = info
+        launch {
+            try {
+                val info = AppUpdateManager.checkForUpdate(context)
+                if (info != null && info.hasUpdate) {
+                    updateInfo = info
+                }
+            } catch (e: Exception) {}
         }
-        try {
-            spaceRepo.syncSpacesFromServer()
-        } finally {
-            isInitialLoading = false
+        launch {
+            try {
+                spaceRepo.syncSpacesFromServer()
+            } finally {
+                isInitialLoading = false
+            }
         }
         ReminderScheduler.scheduleReminder(context, reminderInterval)
     }
@@ -944,28 +956,41 @@ fun MainScreen(
         )
     }
 
-    // 🌟 [방 길게 누르기 관리 통합 다이얼로그 (수정 / 삭제)]
+    // 🌟 [방 길게 누르기 관리 통합 다이얼로그 (수정 / 삭제 / 색상 변경)]
     if (showSpaceActionDialog && actionTargetSpace != null) {
         val target = actionTargetSpace!!
         AlertDialog(
             onDismissRequest = { showSpaceActionDialog = false },
             title = { Text("🏠 '${target.title}' 방 관리", fontWeight = FontWeight.Bold) },
-            text = { Text("수행할 작업을 선택해 주세요.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        renameTargetSpace = target
-                        renameInputText = target.title
-                        showRenameDialog = true
-                        showSpaceActionDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(currentTheme.accentHex))
-                ) {
-                    Text("✏️ 방 이름 수정", color = Color.White)
-                }
-            },
-            dismissButton = {
-                Row {
+            text = {
+                Column {
+                    Text("수행할 작업을 선택해 주세요.", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Button(
+                        onClick = {
+                            renameTargetSpace = target
+                            renameInputText = target.title
+                            showRenameDialog = true
+                            showSpaceActionDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(currentTheme.accentHex))
+                    ) {
+                        Text("✏️ 방 이름 수정", color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            themeTargetSpace = target
+                            showThemeDialog = true
+                            showSpaceActionDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5C6BC0))
+                    ) {
+                        Text("🎨 방 테마 색상 변경", color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         onClick = {
                             showSpaceActionDialog = false
@@ -979,14 +1004,17 @@ fun MainScreen(
                                 showDeleteDialog = true
                             }
                         },
+                        modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
                     ) {
                         Text("🗑️ 방 삭제", color = Color.White)
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    TextButton(onClick = { showSpaceActionDialog = false }) {
-                        Text("취소")
-                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showSpaceActionDialog = false }) {
+                    Text("닫기", color = Color.Gray)
                 }
             }
         )
@@ -1075,6 +1103,46 @@ fun MainScreen(
             dismissButton = {
                 TextButton(onClick = { showRenameDialog = false }) {
                     Text("취소")
+                }
+            }
+        )
+    }
+
+    // 🌟 [방 테마 색상 변경 다이얼로그]
+    if (showThemeDialog && themeTargetSpace != null) {
+        val target = themeTargetSpace!!
+        var selectedTheme by remember(target) { mutableStateOf(target.getTheme()) }
+
+        AlertDialog(
+            onDismissRequest = { showThemeDialog = false },
+            title = { Text("🎨 '${target.title}' 방 색상 변경", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("원하는 방 테마 색상을 선택해 주세요:", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(14.dp))
+                    ThemeColorPaletteSelector(
+                        selectedTheme = selectedTheme,
+                        onSelectTheme = { selectedTheme = it }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            spaceRepo.updateSpaceTheme(target.id, selectedTheme)
+                            Toast.makeText(context, "'${target.title}' 방 색상을 ${selectedTheme.displayName}(으)로 변경했어요 🌸", Toast.LENGTH_SHORT).show()
+                        }
+                        showThemeDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(selectedTheme.accentHex))
+                ) {
+                    Text("적용하기", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showThemeDialog = false }) {
+                    Text("취소", color = Color.Gray)
                 }
             }
         )
@@ -1568,12 +1636,26 @@ private fun TaskCardItem(
     onLongClick: () -> Unit
 ) {
     val badge = task.getDueBadge(todayDate)
+    val isOverdue = !task.isCompleted && badge == DueBadge.OVERDUE
+
+    // 기한 초과 시 소프트 로즈 틴트 배경 및 은은한 로즈 핑크 테두리 적용 (방식 A)
+    val cardBgColor = when {
+        task.isCompleted -> Color(0xFFF9F9F9)
+        isOverdue -> Color(0xFFFFF0F2)
+        else -> Color.White
+    }
+    val cardBorder = if (isOverdue) {
+        BorderStroke(1.dp, Color(0xFFFFA4B2).copy(alpha = 0.6f))
+    } else {
+        null
+    }
 
     Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (task.isCompleted) Color(0xFFF9F9F9) else Color.White
+            containerColor = cardBgColor
         ),
+        border = cardBorder,
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -1815,7 +1897,56 @@ private fun EmptySpaceGuide(
 }
 
 /**
- * 초대 코드 입력 및 새 방 개설 다이얼로그
+ * 5종 감성 파스텔 테마 컬러 팔레트 선택 컴포넌트
+ */
+@Composable
+private fun ThemeColorPaletteSelector(
+    selectedTheme: ThemeColor,
+    onSelectTheme: (ThemeColor) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ThemeColor.entries.forEach { theme ->
+            val isSelected = theme == selectedTheme
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = if (isSelected) Color(theme.accentHex).copy(alpha = 0.15f) else Color(0xFFF8F8F8),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .clickable { onSelectTheme(theme) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .background(Color(theme.accentHex), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSelected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = "선택됨",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = theme.displayName,
+                    fontSize = 14.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isSelected) Color(theme.accentHex) else Color(0xFF333333)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 초대 코드 입력 및 새 방 개설 다이얼로그 (테마 컬러 선택 지원)
  */
 @Composable
 private fun JoinSpaceDialog(
@@ -1829,6 +1960,7 @@ private fun JoinSpaceDialog(
 ) {
     var inputCode by remember { mutableStateOf("") }
     var newTitle by remember { mutableStateOf("") }
+    var selectedTheme by remember { mutableStateOf(ThemeColor.CORAL) }
     var isCreating by remember { mutableStateOf(initialCreating) }
 
     // 연결하기 버튼은 유효한 4자리 코드가 모두 입력되었을 때만 활성화
@@ -1843,7 +1975,7 @@ private fun JoinSpaceDialog(
                     OutlinedTextField(
                         value = newTitle,
                         onValueChange = { newTitle = it },
-                        label = { Text("방 이름 (예: 엄마와 나)") },
+                        label = { Text("방 이름 (예: 엄마와 나, 모임)") },
                         isError = createError != null,
                         supportingText = {
                             if (createError != null) {
@@ -1852,6 +1984,13 @@ private fun JoinSpaceDialog(
                         },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("방 테마 색상 선택 🎨", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    ThemeColorPaletteSelector(
+                        selectedTheme = selectedTheme,
+                        onSelectTheme = { selectedTheme = it }
                     )
                 } else {
                     OutlinedTextField(
@@ -1882,14 +2021,14 @@ private fun JoinSpaceDialog(
             Button(
                 onClick = {
                     if (isCreating && newTitle.isNotBlank()) {
-                        onCreateNew(newTitle, ThemeColor.GREEN)
+                        onCreateNew(newTitle, selectedTheme)
                     } else if (!isCreating && isCodeValid) {
                         onJoinCode(inputCode)
                     }
                 },
                 enabled = if (isCreating) newTitle.isNotBlank() else isCodeValid,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(theme.accentHex),
+                    containerColor = if (isCreating) Color(selectedTheme.accentHex) else Color(theme.accentHex),
                     disabledContainerColor = Color(0xFFCCCCCC)
                 )
             ) {

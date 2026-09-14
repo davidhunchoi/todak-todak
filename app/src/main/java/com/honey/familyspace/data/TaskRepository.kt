@@ -59,6 +59,18 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         }
     }
 
+    /**
+     * 할 일/루틴 데이터 변경 시 홈 화면 위젯 및 상단바 고정 알림 실시간 동기화
+     */
+    private suspend fun notifyWidgetAndNotification() {
+        dataStore?.context?.let { ctx ->
+            try {
+                com.honey.familyspace.widget.FamilySpaceWidget().updateAll(ctx)
+                com.honey.familyspace.notification.OngoingNotificationManager.updateOngoingNotification(ctx)
+            } catch (e: Exception) {}
+        }
+    }
+
     // ==========================================
     // 1. 할 일 (Task) 실시간 관리
     // ==========================================
@@ -99,7 +111,10 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
 
         // 로컬 즉각 반영 (0.1초 반응)
         val flow = getTaskFlow(spaceId)
-        flow.value = listOf(newTask) + flow.value
+        val updatedList = listOf(newTask) + flow.value
+        flow.value = updatedList
+        dataStore?.context?.let { saveTasksToCache(it, spaceId, updatedList) }
+        notifyWidgetAndNotification()
 
         // 특정 시각 소리 알람 예약
         dataStore?.context?.let { ctx ->
@@ -131,13 +146,16 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         val newStatus = !currentStatus
         val flow = getTaskFlow(spaceId)
         var toggledTask: Task? = null
-        flow.value = flow.value.map {
+        val updatedList = flow.value.map {
             if (it.id == taskId) {
                 val updated = it.copy(isCompleted = newStatus, completedAt = if (newStatus) System.currentTimeMillis() else null)
                 toggledTask = updated
                 updated
             } else it
         }
+        flow.value = updatedList
+        dataStore?.context?.let { saveTasksToCache(it, spaceId, updatedList) }
+        notifyWidgetAndNotification()
 
         // 완료 상태가 되면 알람 자동 취소
         dataStore?.context?.let { ctx ->
@@ -176,7 +194,7 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val flow = getTaskFlow(spaceId)
         var updatedTask: Task? = null
-        flow.value = flow.value.map {
+        val updatedList = flow.value.map {
             if (it.id == taskId) {
                 val updated = it.copy(
                     title = newTitle,
@@ -188,6 +206,9 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
                 updated
             } else it
         }
+        flow.value = updatedList
+        dataStore?.context?.let { saveTasksToCache(it, spaceId, updatedList) }
+        notifyWidgetAndNotification()
 
         // 알람 스케줄 갱신
         dataStore?.context?.let { ctx ->
@@ -217,7 +238,10 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
 
     suspend fun deleteTask(spaceId: String, taskId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val flow = getTaskFlow(spaceId)
-        flow.value = flow.value.filter { it.id != taskId }
+        val updatedList = flow.value.filter { it.id != taskId }
+        flow.value = updatedList
+        dataStore?.context?.let { saveTasksToCache(it, spaceId, updatedList) }
+        notifyWidgetAndNotification()
 
         // 삭제된 할 일의 알람 취소
         dataStore?.context?.let { ctx ->
@@ -336,9 +360,12 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val flow = getRoutineFlow(spaceId)
         val currentList = flow.value
-        flow.value = currentList.map {
+        val updatedList = currentList.map {
             if (it.id == routineId) it.copy(title = newTitle.trim()) else it
         }
+        flow.value = updatedList
+        dataStore?.context?.let { saveRoutinesToCache(it, spaceId, updatedList) }
+        notifyWidgetAndNotification()
         Result.success(Unit)
     }
 
@@ -359,7 +386,10 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         )
 
         val flow = getRoutineFlow(spaceId)
-        flow.value = flow.value + routine
+        val updatedList = flow.value + routine
+        flow.value = updatedList
+        dataStore?.context?.let { saveRoutinesToCache(it, spaceId, updatedList) }
+        notifyWidgetAndNotification()
 
         try {
             val jsonBody = JSONObject().apply {
@@ -385,7 +415,7 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         val myId = myUserId()
 
         val flow = getRoutineFlow(spaceId)
-        flow.value = flow.value.map {
+        val updatedList = flow.value.map {
             if (it.id == routineId) {
                 it.copy(
                     lastCompletedDate = todayDate,
@@ -393,6 +423,9 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
                 )
             } else it
         }
+        flow.value = updatedList
+        dataStore?.context?.let { saveRoutinesToCache(it, spaceId, updatedList) }
+        notifyWidgetAndNotification()
 
         try {
             val jsonBody = JSONObject().apply {
@@ -461,6 +494,7 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
             val mergedRoutines = localsOnly + synced
             flow.value = mergedRoutines
             dataStore?.context?.let { saveRoutinesToCache(it, spaceId, mergedRoutines) }
+            notifyWidgetAndNotification()
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -470,8 +504,10 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
 
     suspend fun deleteRoutine(spaceId: String, routineId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val flow = getRoutineFlow(spaceId)
-        flow.value = flow.value.filter { it.id != routineId }
-        dataStore?.context?.let { saveRoutinesToCache(it, spaceId, flow.value) }
+        val updatedList = flow.value.filter { it.id != routineId }
+        flow.value = updatedList
+        dataStore?.context?.let { saveRoutinesToCache(it, spaceId, updatedList) }
+        notifyWidgetAndNotification()
 
         try {
             val request = Request.Builder()
