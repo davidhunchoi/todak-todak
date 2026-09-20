@@ -1140,6 +1140,47 @@ def cancel_space_delete(space_id):
         _db_close(db)
 
 
+@app.route("/api/admin/debug-spaces", methods=["GET"])
+def admin_debug_spaces():
+    """현재 DB의 모든 방 목록 및 멤버 수 조회 (고립 방 식별용)"""
+    db = get_db()
+    try:
+        spaces = _rows(_q(db, "SELECT id, title, created_by, created_at FROM spaces ORDER BY created_at DESC"))
+        result = []
+        for s in spaces:
+            space_id = _row_get(s, "id", 0)
+            m_cnt = _cell(_q(db, "SELECT COUNT(*) FROM space_members WHERE space_id = ?", (space_id,))) or 0
+            result.append({
+                "id": space_id,
+                "title": _row_get(s, "title", 1),
+                "created_by": _row_get(s, "created_by", 2),
+                "created_at": _row_get(s, "created_at", 3),
+                "member_count": m_cnt
+            })
+        return jsonify({"count": len(result), "spaces": result}), 200
+    finally:
+        _db_close(db)
+
+
+@app.route("/api/spaces/<space_id>/force-delete", methods=["POST", "DELETE", "GET"])
+def force_delete_space(space_id):
+    """상대방이 응답할 수 없는 고립된 유령 방 비상 강제 삭제"""
+    db = get_db()
+    try:
+        s = _one(_q(db, "SELECT id, title FROM spaces WHERE id = ?", (space_id,)))
+        if not s:
+            return jsonify({"error": "존재하지 않거나 이미 삭제된 방입니다."}), 404
+        title = _row_get(s, "title", 1)
+        delete_space_data(db, space_id)
+        return jsonify({
+            "deleted": True,
+            "message": f"'{title}' 방이 성공적으로 강제 삭제되었습니다.",
+            "space_id": space_id
+        }), 200
+    finally:
+        _db_close(db)
+
+
 @app.route("/api/users/<user_id>/spaces", methods=["GET"])
 def get_user_spaces(user_id):
     """사용자가 참여 중인 스페이스 목록 조회"""
