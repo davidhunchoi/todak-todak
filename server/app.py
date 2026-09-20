@@ -1056,7 +1056,12 @@ def request_space_delete(space_id):
         s_res = _q(db, "SELECT id FROM spaces WHERE id = ?", (space_id,))
         s_rows = _rows(s_res)
         if not s_rows:
-            return jsonify({"error": "이미 삭제되었거나 존재하지 않는 방입니다."}), 404
+            return jsonify({
+                "deleted": True,
+                "message": "이미 삭제되었거나 존재하지 않는 방입니다. 로컬에서도 정리합니다.",
+                "member_count": 0,
+                "pending": 0
+            }), 200
 
         m_res = _q(db, "SELECT user_id FROM space_members WHERE space_id = ?", (space_id,))
         m_rows = _rows(m_res)
