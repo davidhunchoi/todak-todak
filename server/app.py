@@ -1149,8 +1149,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 14
-CURRENT_APP_VERSION_NAME = "1.4.0"
+CURRENT_APP_VERSION_CODE = 15
+CURRENT_APP_VERSION_NAME = "1.5.0"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1161,7 +1161,7 @@ def get_app_version():
         # 고정 자산명: 구버전 앱(app-debug.apk 링크 내장) 호환을 위해 폴백 URL도 함께 제공
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk",
-        "changelog": "🌸 v1.4.0 맞춤형 업데이트\n- 🔄 상단 새로고침 시 앱 최신 버전 즉시 체크\n- ⏰ 기한 초과 카드 강조 (은은한 로즈 틴트 파스텔 배경 & 핑크 테두리)"
+        "changelog": "🌸 v1.5.0 초고속 업데이트\n- ⚡ 초고속 Vercel 서버 이전 (지연 없는 즉시 응답)\n- 🏡 스페이스 방 생성 및 4자리 초대 코드 연결 안정화"
     }), 200
 
 
