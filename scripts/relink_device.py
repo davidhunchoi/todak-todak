@@ -36,11 +36,9 @@ from datetime import datetime, timedelta, timezone
 DEFAULT_BASE_URL = "https://todak-todak-ruby.vercel.app"
 KST = timezone(timedelta(hours=9))
 
-# Windows 콘솔(cp949)에서도 안전하게 한글/기호를 출력하도록 표준출력을 UTF-8 로 재설정
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+# NOTE: Windows PowerShell(pwsh 포함)은 네이티브 명령 출력을 콘솔 코드페이지(cp949)로
+# 디코딩하므로, stdout 을 UTF-8 로 강제하면 한글이 깨져 '-match 상대' 같은 검사가 실패한다.
+# 따라서 인코딩을 강제하지 않고, cp949 에 없는 특수문자(→, ↳, ·)를 쓰지 않는다.
 
 
 def log(*args):
@@ -96,7 +94,7 @@ def print_members(space):
     creator = space.get("created_by")
     for m in members:
         role = "방 만든이" if m.get("user_id") == creator else "상대(파트너)"
-        log(f"   · user_id={m.get('user_id')}  [{role}]")
+        log(f"   - user_id={m.get('user_id')}  [{role}]")
         log(f"       가입: {fmt_ms(m.get('joined_at'))} | 카드 작성: {m.get('tasks_created')}건"
             f" | 마지막 카드: {fmt_ms(m.get('last_task_at'))} | 루틴 체크: {m.get('routine_checks')}건")
 
@@ -127,7 +125,7 @@ def cmd_code(space_id, old_user_id):
     log(f"  old_user_id: {res.get('old_user_id')}")
     print(f"RELINK_CODE={res.get('relink_code')}")
     log(f"  -> 재연결 코드: {res.get('relink_code')}")
-    log("  재설치한 폰에서 앱 → [초대 코드 입력]에 위 4자리를 입력하세요.")
+    log("  재설치한 폰에서 앱 > [초대 코드 입력]에 위 4자리를 입력하세요.")
 
 
 def cmd_relink(space_id, old_user_id, new_user_id):
