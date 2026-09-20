@@ -12,3 +12,7 @@ services:
         sync: false
       - key: TURSO_AUTH_TOKEN
         sync: false
+      # 앱 재설치/기기교체 시 '기기 재연결(relink)' 관리자 API 보호 토큰.
+      # 미설정 시 재연결 API 는 전부 403 으로 차단된다.
+      - key: RELINK_TOKEN
+        sync: false

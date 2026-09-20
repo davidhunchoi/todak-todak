@@ -72,7 +72,20 @@ CREATE TABLE IF NOT EXISTS space_delete_requests (
     PRIMARY KEY (space_id, user_id)
 );
 
+-- 8. 기기 재연결 코드 (앱 재설치/기기 교체 시 기존 멤버 자리로 복구)
+--    - 재설치하면 기기 로컬 user_id가 새로 생성되므로, 옛 user_id 자리를 새 user_id로 이전한다.
+--    - 코드는 4자리 숫자이며 30분간 유효하고, 사용 즉시 소멸한다.
+CREATE TABLE IF NOT EXISTS relink_codes (
+    code TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL,
+    old_user_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+);
+
 -- 인덱스 생성
 CREATE INDEX IF NOT EXISTS idx_tasks_space ON tasks(space_id, is_completed);
 CREATE INDEX IF NOT EXISTS idx_routines_space ON routines(space_id);
 CREATE INDEX IF NOT EXISTS idx_members_user ON space_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_relink_space ON relink_codes(space_id);

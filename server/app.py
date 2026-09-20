@@ -35,6 +35,11 @@ def handle_internal_error(e):
 TURSO_DB_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 
+# 기기 재연결(relink) 관리자 토큰.
+# 앱 재설치/기기교체 시 옛 멤버 자리를 새 기기로 이전할 때만 사용하는 비밀 토큰.
+# 환경변수 RELINK_TOKEN 이 없으면 재연결 관련 관리자 API는 전부 403 으로 차단된다(안전한 기본값).
+RELINK_TOKEN = os.getenv("RELINK_TOKEN")
+
 # 한국 시간대 (KST)
 KST = ZoneInfo("Asia/Seoul")
 
@@ -206,7 +211,17 @@ def migrate_schema_columns(db):
             user_id TEXT NOT NULL,
             requested_at INTEGER NOT NULL,
             PRIMARY KEY (space_id, user_id)
-        )"""
+        )""",
+        # 기기 재연결 코드 (앱 재설치/기기 교체 시 옛 멤버 자리를 새 기기 user_id 로 이전)
+        """CREATE TABLE IF NOT EXISTS relink_codes (
+            code TEXT PRIMARY KEY,
+            space_id TEXT NOT NULL,
+            old_user_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_relink_space ON relink_codes(space_id)",
     ]
     for tbl_sql in extra_tables:
         try:
@@ -425,6 +440,102 @@ def generate_unique_invite_code(db):
             return code
         code = generate_invite_code()
     return code
+
+
+def generate_unique_relink_code(db):
+    """초대 코드/재연결 코드 어느 쪽과도 겹치지 않는 4자리 숫자 코드 생성"""
+    code = generate_invite_code()
+    for _ in range(30):
+        used_invite = _one(_q(db, "SELECT 1 FROM invites WHERE code = ?", (code,)))
+        used_relink = _one(_q(db, "SELECT 1 FROM relink_codes WHERE code = ?", (code,)))
+        if not used_invite and not used_relink:
+            return code
+        code = generate_invite_code()
+    return code
+
+
+def _relink_token_ok():
+    """재연결 관리자 API 토큰 검증. RELINK_TOKEN 미설정 시 항상 거부(안전한 기본값)."""
+    if not RELINK_TOKEN:
+        return False
+    supplied = request.headers.get("X-Relink-Token") or ""
+    if not supplied:
+        body = request.get_json(silent=True) or {}
+        supplied = str(body.get("token") or "")
+    if not supplied:
+        supplied = request.args.get("token", "")
+    return secrets.compare_digest(supplied, RELINK_TOKEN)
+
+
+def _space_members_detail(db, space_id):
+    """스페이스 멤버 목록 + 식별에 도움이 되는 활동 통계 반환"""
+    rows = _rows(_q(db, "SELECT user_id, joined_at FROM space_members WHERE space_id = ?", (space_id,)))
+    members = []
+    for row in rows:
+        uid = _row_get(row, "user_id", 0)
+        joined_at = _row_get(row, "joined_at", 1) or 0
+        task_cnt = _cell(_q(db, "SELECT COUNT(*) FROM tasks WHERE space_id = ? AND created_by = ?", (space_id, uid))) or 0
+        last_task = _cell(_q(db, "SELECT MAX(created_at) FROM tasks WHERE space_id = ? AND created_by = ?", (space_id, uid)))
+        check_cnt = _cell(_q(db,
+            "SELECT COUNT(*) FROM routine_checks WHERE user_id = ? AND routine_id IN (SELECT id FROM routines WHERE space_id = ?)",
+            (uid, space_id))) or 0
+        members.append({
+            "user_id": uid,
+            "joined_at": joined_at,
+            "tasks_created": task_cnt,
+            "last_task_at": last_task,
+            "routine_checks": check_cnt,
+        })
+    members.sort(key=lambda m: m.get("joined_at") or 0)
+    return members
+
+
+def _relink_member(db, space_id, old_user_id, new_user_id):
+    """옛 기기 user_id 자리를 새 기기 user_id 로 이전 (개인 기록까지 승계).
+
+    앱을 삭제/재설치하면 기기 로컬 user_id 가 새로 발급되므로,
+    방 멤버 자리와 사람별 기록(routine_checks, tasks.created_by)을 새 id 로 옮긴다.
+    반환: (ok: bool, message: str, moved: dict)
+    """
+    if not old_user_id or not new_user_id:
+        return False, "old_user_id 와 new_user_id 가 모두 필요합니다.", {}
+    if old_user_id == new_user_id:
+        return False, "이미 같은 사용자입니다.", {}
+
+    if not _one(_q(db, "SELECT 1 FROM spaces WHERE id = ?", (space_id,))):
+        return False, "존재하지 않는 스페이스입니다.", {}
+
+    if not _one(_q(db, "SELECT 1 FROM space_members WHERE space_id = ? AND user_id = ?", (space_id, old_user_id))):
+        return False, "이 방에 옛 사용자(user_id)가 없습니다. user_id를 확인해 주세요.", {}
+
+    if _one(_q(db, "SELECT 1 FROM space_members WHERE space_id = ? AND user_id = ?", (space_id, new_user_id))):
+        return False, "새 사용자(user_id)가 이미 이 방의 멤버입니다.", {}
+
+    moved = {}
+
+    # 1) 사람별 루틴 체크 기록 승계 (PK 충돌 방지를 위해 새 id 기존 행 먼저 정리)
+    _q(db, "DELETE FROM routine_checks WHERE user_id = ? AND routine_id IN (SELECT id FROM routines WHERE space_id = ?)",
+       (new_user_id, space_id))
+    _q(db, "UPDATE routine_checks SET user_id = ? WHERE user_id = ? AND routine_id IN (SELECT id FROM routines WHERE space_id = ?)",
+       (new_user_id, old_user_id, space_id))
+    moved["routine_checks"] = True
+
+    # 2) 카드/할 일 작성자 표기 승계
+    _q(db, "UPDATE tasks SET created_by = ? WHERE space_id = ? AND created_by = ?", (new_user_id, space_id, old_user_id))
+
+    # 3) 방 생성자 및 삭제 동의 요청 승계
+    _q(db, "UPDATE spaces SET created_by = ? WHERE id = ? AND created_by = ?", (new_user_id, space_id, old_user_id))
+    _q(db, "DELETE FROM space_delete_requests WHERE space_id = ? AND user_id = ?", (space_id, new_user_id))
+    _q(db, "UPDATE space_delete_requests SET user_id = ? WHERE space_id = ? AND user_id = ?", (new_user_id, space_id, old_user_id))
+
+    # 4) 멤버 자리 이전 (마지막에 실행 → 위 검증들이 유효하도록)
+    _q(db, "UPDATE space_members SET user_id = ? WHERE space_id = ? AND user_id = ?", (new_user_id, space_id, old_user_id))
+
+    # 5) 이 방의 남은 재연결 코드 정리
+    _q(db, "DELETE FROM relink_codes WHERE space_id = ?", (space_id,))
+
+    _db_commit(db)
+    return True, "기기 재연결이 완료되었습니다.", moved
 
 
 def get_current_korean_time():
@@ -666,7 +777,11 @@ def get_space_invite(space_id):
 
 @app.route("/api/spaces/join", methods=["POST"])
 def join_space():
-    """4자리 숫자 초대 코드로 참여 (1:1 2명 제한 보호)"""
+    """4자리 숫자 코드로 참여 또는 기기 재연결 (1:1 2명 제한 보호)
+
+    - 초대 코드: 새 멤버로 참여 (2명 초과 시 거부)
+    - 재연결 코드: 재설치/기기교체 시 옛 멤버 자리를 이 기기 user_id 로 이전 (인원 제한 예외)
+    """
     data = request.json or {}
     raw_code = data.get("code", "").replace("-", "").replace(" ", "").upper()
     user_id = data.get("user_id") or str(uuid.uuid4())
@@ -680,7 +795,39 @@ def join_space():
         res = _q(db, "SELECT * FROM invites WHERE code = ?", (raw_code,))
         rows = _rows(res)
         if not rows:
-            return jsonify({"error": "유효하지 않거나 이미 사용 완료된 초대 코드입니다."}), 404
+            # 초대 코드가 아니면 '기기 재연결 코드'인지 확인
+            r_rows = _rows(_q(db, "SELECT * FROM relink_codes WHERE code = ?", (raw_code,)))
+            if not r_rows:
+                return jsonify({"error": "유효하지 않거나 이미 사용 완료된 초대 코드입니다."}), 404
+
+            relink = r_rows[0]
+            r_space_id = _row_get(relink, "space_id", 1)
+            r_old_uid = _row_get(relink, "old_user_id", 2)
+            r_expires = _row_get(relink, "expires_at", 4)
+
+            if now_ms > (r_expires or 0):
+                _q(db, "DELETE FROM relink_codes WHERE code = ?", (raw_code,))
+                _db_commit(db)
+                return jsonify({"error": "기기 재연결 코드 유효 시간(30분)이 만료되었습니다."}), 410
+
+            moved_ok, moved_msg, _moved = _relink_member(db, r_space_id, r_old_uid, user_id)
+            if not moved_ok:
+                return jsonify({"error": moved_msg}), 400
+
+            s_rows = _rows(_q(db, "SELECT * FROM spaces WHERE id = ?", (r_space_id,)))
+            if not s_rows:
+                return jsonify({"error": "존재하지 않는 스페이스입니다."}), 404
+            relinked_space = s_rows[0]
+
+            return jsonify({
+                "message": "기기 재연결이 완료되었습니다! 기존 방으로 그대로 복구되었어요.",
+                "relinked": True,
+                "space": {
+                    "id": r_space_id,
+                    "title": _row_get(relinked_space, "title", 1),
+                    "theme_color": _row_get(relinked_space, "theme_color", 2)
+                }
+            }), 200
 
         invite = rows[0]
         space_id = _row_get(invite, "space_id", 1)
@@ -719,6 +866,156 @@ def join_space():
                 "title": _row_get(space, "title", 1),
                 "theme_color": _row_get(space, "theme_color", 2)
             }
+        }), 200
+    finally:
+        _db_close(db)
+
+
+# ==========================================
+# 1-1. 기기 재연결(relink) 관리자 API
+#   - 앱 재설치/기기 교체 시 기기 로컬 user_id 가 새로 발급되어
+#     기존 방에 재참여할 수 없게 되는 문제(1:1 2명 제한)를 해결한다.
+#   - 옛 멤버 자리와 개인 기록(routine_checks, tasks.created_by)을 새 기기로 승계.
+#   - 환경변수 RELINK_TOKEN 이 설정된 경우에만 동작한다(미설정 시 전부 403).
+# ==========================================
+@app.route("/api/admin/spaces", methods=["GET"])
+def admin_list_spaces():
+    """(관리자) 방 목록 + 멤버 활동 통계 조회 — 어떤 user_id 가 누구인지 식별용"""
+    if not _relink_token_ok():
+        return jsonify({"error": "권한이 없습니다. RELINK_TOKEN 을 확인해 주세요."}), 403
+
+    db = get_db()
+    try:
+        spaces = _rows(_q(db, "SELECT id, title, created_by, created_at FROM spaces ORDER BY created_at DESC"))
+        result = []
+        for s in spaces:
+            space_id = _row_get(s, "id", 0)
+            result.append({
+                "space_id": space_id,
+                "title": _row_get(s, "title", 1),
+                "created_by": _row_get(s, "created_by", 2),
+                "created_at": _row_get(s, "created_at", 3),
+                "members": _space_members_detail(db, space_id),
+            })
+        return jsonify({"count": len(result), "spaces": result}), 200
+    finally:
+        _db_close(db)
+
+
+@app.route("/api/spaces/<space_id>/members", methods=["GET"])
+def get_space_members(space_id):
+    """(관리자) 특정 방의 멤버 목록 조회"""
+    if not _relink_token_ok():
+        return jsonify({"error": "권한이 없습니다. RELINK_TOKEN 을 확인해 주세요."}), 403
+
+    db = get_db()
+    try:
+        s = _one(_q(db, "SELECT id, title, created_by FROM spaces WHERE id = ?", (space_id,)))
+        if not s:
+            return jsonify({"error": "존재하지 않는 스페이스입니다."}), 404
+        return jsonify({
+            "space_id": space_id,
+            "title": _row_get(s, "title", 1),
+            "created_by": _row_get(s, "created_by", 2),
+            "members": _space_members_detail(db, space_id),
+        }), 200
+    finally:
+        _db_close(db)
+
+
+@app.route("/api/spaces/<space_id>/relink-code", methods=["POST"])
+def issue_relink_code(space_id):
+    """(관리자) 기기 재연결 코드 발급 (4자리, 30분 유효)
+
+    body: { "old_user_id": "<이전할 옛 멤버 user_id>" }
+    새로 설치한 기기의 [초대 코드 입력]에 이 코드를 넣으면 기존 방으로 복구된다.
+    """
+    if not _relink_token_ok():
+        return jsonify({"error": "권한이 없습니다. RELINK_TOKEN 을 확인해 주세요."}), 403
+
+    data = request.json or {}
+    old_user_id = str(data.get("old_user_id") or "").strip()
+    if not old_user_id:
+        return jsonify({"error": "old_user_id(이전할 옛 멤버 user_id)가 필요합니다."}), 400
+
+    db = get_db()
+    try:
+        now_ms = int(time.time() * 1000)
+        if not _one(_q(db, "SELECT 1 FROM spaces WHERE id = ?", (space_id,))):
+            return jsonify({"error": "존재하지 않는 스페이스입니다."}), 404
+        if not _one(_q(db, "SELECT 1 FROM space_members WHERE space_id = ? AND user_id = ?", (space_id, old_user_id))):
+            return jsonify({"error": "이 방에 해당 user_id 멤버가 없습니다. /members 로 확인해 주세요."}), 404
+
+        _q(db, "DELETE FROM relink_codes WHERE space_id = ?", (space_id,))
+        code = generate_unique_relink_code(db)
+        expires_at = now_ms + (30 * 60 * 1000)
+        _q(db,
+            "INSERT INTO relink_codes (code, space_id, old_user_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+            (code, space_id, old_user_id, now_ms, expires_at))
+        _db_commit(db)
+
+        return jsonify({
+            "relink_code": code,
+            "space_id": space_id,
+            "old_user_id": old_user_id,
+            "expires_in_minutes": 30,
+            "guide": "앱을 삭제 후 새로 설치한 기기에서 [초대 코드 입력]에 이 4자리 코드를 입력하면 기존 방으로 복구됩니다."
+        }), 200
+    finally:
+        _db_close(db)
+
+
+@app.route("/api/spaces/<space_id>/relink", methods=["POST"])
+def direct_relink_member(space_id):
+    """(관리자) 재연결 코드 없이 즉시 멤버 자리 이전
+
+    body: { "old_user_id": "...", "new_user_id": "..." }
+    """
+    if not _relink_token_ok():
+        return jsonify({"error": "권한이 없습니다. RELINK_TOKEN 을 확인해 주세요."}), 403
+
+    data = request.json or {}
+    db = get_db()
+    try:
+        ok, msg, moved = _relink_member(
+            db, space_id,
+            str(data.get("old_user_id") or "").strip(),
+            str(data.get("new_user_id") or "").strip()
+        )
+        if not ok:
+            return jsonify({"error": msg}), 400
+        return jsonify({"message": msg, "moved": moved}), 200
+    finally:
+        _db_close(db)
+
+
+@app.route("/api/admin/spaces/<space_id>/remove-member", methods=["POST"])
+def admin_remove_member(space_id):
+    """(관리자) 멤버 자리 제거 — 양쪽 기기를 모두 재설치한 경우 등 비상용
+
+    body: { "user_id": "<제거할 멤버 user_id>" }
+    제거 후에는 남은 인원이 2명 미만이므로 초대 코드로 재참여할 수 있다.
+    """
+    if not _relink_token_ok():
+        return jsonify({"error": "권한이 없습니다. RELINK_TOKEN 을 확인해 주세요."}), 403
+
+    data = request.json or {}
+    user_id = str(data.get("user_id") or "").strip()
+    if not user_id:
+        return jsonify({"error": "user_id 가 필요합니다."}), 400
+
+    db = get_db()
+    try:
+        if not _one(_q(db, "SELECT 1 FROM space_members WHERE space_id = ? AND user_id = ?", (space_id, user_id))):
+            return jsonify({"error": "해당 멤버가 이 방에 없습니다."}), 404
+
+        _q(db, "DELETE FROM space_members WHERE space_id = ? AND user_id = ?", (space_id, user_id))
+        _q(db, "DELETE FROM relink_codes WHERE space_id = ? AND old_user_id = ?", (space_id, user_id))
+        _db_commit(db)
+
+        return jsonify({
+            "message": "멤버 자리를 제거했습니다. 이제 초대 코드로 재참여할 수 있어요.",
+            "members": _space_members_detail(db, space_id),
         }), 200
     finally:
         _db_close(db)
@@ -1158,9 +1455,11 @@ def get_app_version():
     return jsonify({
         "version_code": CURRENT_APP_VERSION_CODE,
         "version_name": CURRENT_APP_VERSION_NAME,
-        # 고정 자산명: 구버전 앱(app-debug.apk 링크 내장) 호환을 위해 폴백 URL도 함께 제공
+        # 고정 자산명: 릴리스마다 '동일한 release 키'로 서명된 app-release.apk 를 사용한다.
+        # (debug 서명 APK 를 올리면 기존 설치와 서명이 충돌해 "앱이 설치되지 않았습니다" 발생)
+        # 폴백도 같은 정식 자산을 가리킨다 — 과거에는 존재하지 않는 app-debug.apk(404) 였음.
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
-        "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-debug.apk",
+        "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "changelog": "🌸 v1.5.0 초고속 업데이트\n- ⚡ 초고속 Vercel 서버 이전 (지연 없는 즉시 응답)\n- 🏡 스페이스 방 생성 및 4자리 초대 코드 연결 안정화"
     }), 200
 
