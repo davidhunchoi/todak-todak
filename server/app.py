@@ -783,7 +783,8 @@ def join_space():
     - 재연결 코드: 재설치/기기교체 시 옛 멤버 자리를 이 기기 user_id 로 이전 (인원 제한 예외)
     """
     data = request.json or {}
-    raw_code = data.get("code", "").replace("-", "").replace(" ", "").upper()
+    # JSON null 이 들어와도 500이 나지 않도록 문자열로 방어 (예: {"code": null})
+    raw_code = str(data.get("code") or "").replace("-", "").replace(" ", "").upper()
     user_id = data.get("user_id") or str(uuid.uuid4())
 
     if len(raw_code) != 4 or not raw_code.isdigit():

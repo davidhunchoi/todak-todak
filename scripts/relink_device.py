@@ -36,6 +36,12 @@ from datetime import datetime, timedelta, timezone
 DEFAULT_BASE_URL = "https://todak-todak-ruby.vercel.app"
 KST = timezone(timedelta(hours=9))
 
+# Windows 콘솔(cp949)에서도 안전하게 한글/기호를 출력하도록 표준출력을 UTF-8 로 재설정
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 def log(*args):
     print("[relink]", *args)
@@ -103,7 +109,7 @@ def cmd_list():
         log(f"- {s.get('title')} (space_id={s.get('space_id')}, 만든 날짜={fmt_ms(s.get('created_at'))})")
         print_members(s)
         if len(s.get("members") or []) >= 2:
-            log("   ↳ 2명 모두 연결되어 있어 재참여가 막힌 상태입니다. 위 '상대' user_id 로 code 명령을 실행하세요.")
+            log("   -> 2명 모두 연결되어 있어 재참여가 막힌 상태입니다. 위 '상대' user_id 로 code 명령을 실행하세요.")
     if not spaces:
         log("등록된 방이 없습니다.")
 
@@ -119,7 +125,8 @@ def cmd_code(space_id, old_user_id):
     log("기기 재연결 코드 발급 완료 (30분 유효)")
     log(f"  space_id   : {res.get('space_id')}")
     log(f"  old_user_id: {res.get('old_user_id')}")
-    log(f"  ↳ 재연결 코드: {res.get('relink_code')}")
+    print(f"RELINK_CODE={res.get('relink_code')}")
+    log(f"  -> 재연결 코드: {res.get('relink_code')}")
     log("  재설치한 폰에서 앱 → [초대 코드 입력]에 위 4자리를 입력하세요.")
 
 
