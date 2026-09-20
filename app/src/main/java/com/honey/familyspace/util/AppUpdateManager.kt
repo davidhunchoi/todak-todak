@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
@@ -19,6 +20,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /**
@@ -223,9 +225,115 @@ object AppUpdateManager {
         }
     }
 
+    /** 현재 설치된 앱의 서명 인증서 SHA-256 (실패 시 null) */
+    private fun installedSignatureSha256(context: Context): String? {
+        return try {
+            val pm = context.packageManager
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+            }
+            val signers = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                info.signatures
+            }
+            signers?.firstOrNull()?.toByteArray()?.let { sha256Hex(it) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** 다운로드한 APK 파일의 서명 인증서 SHA-256 (실패 시 null) */
+    private fun archiveSignatureSha256(context: Context, file: File): String? {
+        return try {
+            val pm = context.packageManager
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                @Suppress("DEPRECATION")
+                PackageManager.GET_SIGNATURES
+            }
+            val info = pm.getPackageArchiveInfo(file.absolutePath, flags) ?: return null
+            val signers = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                info.signatures
+            }
+            signers?.firstOrNull()?.toByteArray()?.let { sha256Hex(it) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** 다운로드한 APK 파일의 versionCode (실패 시 null) */
+    private fun archiveVersionCode(context: Context, file: File): Long? {
+        return try {
+            @Suppress("DEPRECATION")
+            val info = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0) ?: return null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                info.versionCode.toLong()
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** 현재 설치된 앱의 versionCode (실패 시 null) */
+    private fun installedVersionCode(context: Context): Long? {
+        return try {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                info.versionCode.toLong()
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun sha256Hex(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
     private fun installApk(context: Context, file: File) {
         if (!file.exists() || file.length() < 1024 * 100) {
             Toast.makeText(context, "다운로드된 파일이 손상되었습니다. 다시 시도해 주세요. 😢", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        // 1) 서명 사전 검사: 기존 앱과 서명이 다르면 설치는 100% 실패한다
+        //    ("앱이 설치되지 않았습니다") → 미리 감지해서 이유와 해결 방법을 안내한다.
+        val installedSig = installedSignatureSha256(context)
+        val newSig = archiveSignatureSha256(context, file)
+        if (installedSig != null && newSig != null && installedSig != newSig) {
+            try { file.delete() } catch (e: Exception) {}
+            Toast.makeText(
+                context,
+                "기존 앱과 서명이 달라 자동 업데이트를 할 수 없어요. 😢\n" +
+                    "앱을 삭제한 뒤 새로 설치하고, 상대방에게 [기기 재연결 코드]를 받아 " +
+                    "[초대 코드 입력]에 넣으면 기존 방·카드가 그대로 복구돼요.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        // 2) 버전 사전 검사: 다운로드한 APK가 설치된 버전보다 높지 않으면 설치가 거부된다
+        val newVersion = archiveVersionCode(context, file)
+        val currentVersion = installedVersionCode(context)
+        if (newVersion != null && currentVersion != null && newVersion <= currentVersion) {
+            try { file.delete() } catch (e: Exception) {}
+            Toast.makeText(context, "이미 최신 버전이 설치되어 있어요. 😊", Toast.LENGTH_LONG).show()
             return
         }
 

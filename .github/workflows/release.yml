@@ -71,12 +71,12 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
-            echo "keystore restored"
-          else
-            echo "::warning::ANDROID_KEYSTORE_BASE64 secret이 없어 debug 서명으로 빌드됩니다. 기존 설치와 서명 충돌(설치 안 됨)이 날 수 있어 정식 배포 전 Secrets 등록 필수!"
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret이 없습니다. debug 키로 빌드하면 기존 설치와 서명이 충돌해 '앱이 설치되지 않았습니다'가 발생하므로 배포를 중단합니다."
+            exit 1
           fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          echo "keystore restored"
 
       - name: Build Release APK (signed with fixed key)
         env:
@@ -88,13 +88,11 @@ jobs:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
         run: |
           set -o pipefail
-          if [ -f "$RUNNER_TEMP/release.keystore" ]; then
-            ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
-            cp app/build/outputs/apk/release/app-release.apk app-release.apk
-          else
-            ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
-            cp app/build/outputs/apk/debug/app-debug.apk app-release.apk
-          fi
+          # release 키가 반드시 있어야 하므로 항상 assembleRelease 로 빌드한다.
+          # (keystore 없이 assembleDebug 로 폴백하면 debug 서명 APK 가 app-release.apk 이름으로 올라가
+          #  기존 설치와 서명 충돌 → "설치 안 됨" 사고가 재발한다)
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+          cp app/build/outputs/apk/release/app-release.apk app-release.apk
 
       - name: Report Build Error Log
         if: failure()
@@ -115,6 +113,13 @@ jobs:
       - name: Verify artifact
         run: |
           ls -lh app-release.apk
+          # 서명 검증: release 키로 서명되었는지 확인 (실패 시 배포 중단)
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          if [ -x "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs app-release.apk
+          else
+            echo "::warning::apksigner 를 찾지 못해 서명 검증을 건너뜁니다."
+          fi
 
       - name: Compute release tag
         id: tag

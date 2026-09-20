@@ -10,10 +10,15 @@
   1) GitHub CLI(gh) 설치 + `gh auth login`
   2) GITHUB_TOKEN 환경변수 (repo 권한의 Personal Access Token)
 
+  ⚠️ 릴리스 APK 는 반드시 '고정 release 키'로 서명해야 한다.
+     debug 키로 빌드한 APK 를 올리면 기존 설치와 서명이 충돌해
+     "앱이 설치되지 않았습니다" 가 발생한다.
+     → KEYSTORE_PATH / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD 환경변수 필요.
+
 동작:
-  - app/build/outputs/apk/debug/app-debug.apk 가 없으면 먼저 빌드
+  - app/build/outputs/apk/release/app-release.apk 가 없으면 먼저 빌드
   - 지정 태그(v1.2.0)로 Release 생성(+실패 시 업데이트)하고
-    app-debug.apk 를 첨부 (배포 링크가 고정됨)
+    app-release.apk 를 첨부 (배포 링크가 고정됨)
 """
 import os
 import shutil
@@ -27,7 +32,8 @@ import json
 REPO = "davidhunchoi/todak-todak"
 API = f"https://api.github.com/repos/{REPO}"
 UPLOADS = f"https://uploads.github.com/repos/{REPO}"
-APK_REL = os.path.join("app", "build", "outputs", "apk", "debug", "app-debug.apk")
+APK_REL = os.path.join("app", "build", "outputs", "apk", "release", "app-release.apk")
+ASSET_NAME = "app-release.apk"
 DEFAULT_TAG = "v1.2.0"
 
 
@@ -44,11 +50,18 @@ def build_if_missing():
     if os.path.exists(APK_REL):
         log(f"APK 발견: {APK_REL}")
         return
-    log("APK가 없어 빌드를 시작합니다...")
+    log("APK가 없어 release 빌드를 시작합니다...")
+    keystore = os.environ.get("KEYSTORE_PATH")
+    if not keystore or not os.path.exists(keystore):
+        sys.exit(
+            "[오류] release 서명 키를 찾을 수 없습니다. (KEYSTORE_PATH)\n"
+            "  debug 키로 올리면 기존 설치와 서명이 충돌해 '앱이 설치되지 않았습니다'가 발생합니다.\n"
+            "  KEYSTORE_PATH / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD 를 설정한 뒤 다시 실행해 주세요."
+        )
     wrapper = "gradlew.bat" if os.name == "nt" else "./gradlew"
-    rc = run([wrapper, "assembleDebug", "--console=plain"])
+    rc = run([wrapper, "assembleRelease", "--console=plain"])
     if rc != 0:
-        sys.exit("빌드 실패. 먼저 ./gradlew assembleDebug 을 확인해 주세요.")
+        sys.exit("빌드 실패. 먼저 ./gradlew assembleRelease 을 확인해 주세요.")
     if not os.path.exists(APK_REL):
         sys.exit(f"빌드 후에도 APK가 없습니다: {APK_REL}")
 
@@ -87,7 +100,7 @@ def main():
             if rc != 0:
                 sys.exit("gh release 조작 실패")
         log("배포 완료 →",
-            f"https://github.com/{REPO}/releases/latest/download/app-debug.apk")
+            f"https://github.com/{REPO}/releases/latest/download/{ASSET_NAME}")
         return
 
     # 2) GITHUB_TOKEN 폴백
@@ -117,20 +130,20 @@ def main():
     # 기존 동일 asset 제거 후 업로드
     assets = rel.get("assets") or []
     for a in assets:
-        if a.get("name") == "app-debug.apk":
+        if a.get("name") == ASSET_NAME:
             api_request("DELETE", f"{API}/releases/assets/{a['id']}", token)
-            log("기존 app-debug.apk 제거 후 재업로드")
+            log(f"기존 {ASSET_NAME} 제거 후 재업로드")
 
     with open(APK_REL, "rb") as f:
         apk_bytes = f.read()
-    log(f"app-debug.apk ({len(apk_bytes)//1024}KB) 업로드 중...")
+    log(f"{ASSET_NAME} ({len(apk_bytes)//1024}KB) 업로드 중...")
     result = api_request(
-        "POST", f"{UPLOADS}/releases/{release_id}/assets?name=app-debug.apk",
+        "POST", f"{UPLOADS}/releases/{release_id}/assets?name={ASSET_NAME}",
         token, apk_bytes, content_type="application/vnd.android.package-archive",
     )
     if result.get("id"):
         log("배포 완료 →",
-            f"https://github.com/{REPO}/releases/latest/download/app-debug.apk")
+            f"https://github.com/{REPO}/releases/latest/download/{ASSET_NAME}")
     else:
         sys.exit(f"업로드 실패: {result}")
 
