@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit
 class TaskRepository(private val dataStore: DataStoreManager? = null) {
 
     companion object {
-        private const val BASE_URL = "https://todak-todak.onrender.com"
+        private const val BASE_URL = "https://todak-todak-ruby.vercel.app"
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
         private val client = OkHttpClient.Builder()

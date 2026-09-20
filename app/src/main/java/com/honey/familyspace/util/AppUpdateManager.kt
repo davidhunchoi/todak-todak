@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit
  */
 object AppUpdateManager {
 
-    private const val VERSION_CHECK_URL = "https://todak-todak.onrender.com/api/version"
+    private const val VERSION_CHECK_URL = "https://todak-todak-ruby.vercel.app/api/version"
 
     /** 설치 권한 화면을 다녀온 뒤 대기 중이던 APK URL (MainActivity.onResume에서 이어받기용) */
     @Volatile
