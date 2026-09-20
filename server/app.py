@@ -1181,6 +1181,39 @@ def force_delete_space(space_id):
         _db_close(db)
 
 
+@app.route("/api/admin/restore-couple-space", methods=["GET", "POST"])
+def restore_couple_space():
+    """'우리 부부 ^^' 원본 방 즉시 복구"""
+    db = get_db()
+    space_id = "23c82b37-9314-40f4-b49f-11455757c0ad"
+    now_ms = int(time.time() * 1000)
+    expires_at = now_ms + (24 * 60 * 60 * 1000)  # 24시간
+    try:
+        _q(db,
+            "INSERT OR REPLACE INTO spaces (id, title, theme_color, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+            (space_id, "우리 부부 ^^", "CORAL", "60e85789", 1789920286284)
+        )
+        _q(db,
+            "INSERT OR IGNORE INTO space_members (space_id, user_id, joined_at) VALUES (?, ?, ?)",
+            (space_id, "60e85789", 1789920286284)
+        )
+        # 초대 코드 '7777'을 24시간 동안 유효하게 등록 (필요시 아내폰에서 7777 입력으로 즉시 연결)
+        _q(db, "DELETE FROM invites WHERE space_id = ?", (space_id,))
+        _q(db,
+            "INSERT OR REPLACE INTO invites (code, space_id, created_by, expires_at) VALUES (?, ?, ?, ?)",
+            ("7777", space_id, "60e85789", expires_at)
+        )
+        _db_commit(db)
+        return jsonify({
+            "restored": True,
+            "space_id": space_id,
+            "title": "우리 부부 ^^",
+            "invite_code": "7777"
+        }), 200
+    finally:
+        _db_close(db)
+
+
 @app.route("/api/users/<user_id>/spaces", methods=["GET"])
 def get_user_spaces(user_id):
     """사용자가 참여 중인 스페이스 목록 조회"""
