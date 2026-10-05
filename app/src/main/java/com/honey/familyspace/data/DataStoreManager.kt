@@ -24,6 +24,63 @@ class DataStoreManager(val context: Context) {
         private val KEY_USER_ID = stringPreferencesKey("user_id")
         private val KEY_REMINDER_INTERVAL_HOURS = androidx.datastore.preferences.core.intPreferencesKey("reminder_interval_hours")
         private val KEY_REMINDER_NIGHT_MUTE = androidx.datastore.preferences.core.booleanPreferencesKey("reminder_night_mute")
+        // 마이 내비게이터(My Navigator) 파워유저 연동 설정
+        private val KEY_NAVIGATOR_ENABLED = androidx.datastore.preferences.core.booleanPreferencesKey("navigator_enabled")
+        private val KEY_NAVIGATOR_SERVER_URL = stringPreferencesKey("navigator_server_url")
+        private val KEY_NAVIGATOR_API_KEY = stringPreferencesKey("navigator_api_key")
+        private val KEY_NAVIGATOR_DEFAULT_TASK_GROUP = stringPreferencesKey("navigator_default_task_group")
+    }
+
+    /**
+     * 마이 내비게이터 연동 활성화 스트림
+     */
+    val navigatorEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_NAVIGATOR_ENABLED] ?: false
+    }
+
+    suspend fun setNavigatorEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_NAVIGATOR_ENABLED] = enabled
+        }
+    }
+
+    /**
+     * 마이 내비게이터 웹 서버 주소 (예: https://my-navigator.vercel.app)
+     */
+    val navigatorServerUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_NAVIGATOR_SERVER_URL] ?: ""
+    }
+
+    suspend fun setNavigatorServerUrl(url: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_NAVIGATOR_SERVER_URL] = url.trim().removeSuffix("/")
+        }
+    }
+
+    /**
+     * 마이 내비게이터 보안 API Key
+     */
+    val navigatorApiKeyFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_NAVIGATOR_API_KEY] ?: ""
+    }
+
+    suspend fun setNavigatorApiKey(key: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_NAVIGATOR_API_KEY] = key.trim()
+        }
+    }
+
+    /**
+     * 마이 내비게이터 Gantt 기본 수신 그룹명 (기본값: "📥 토닥 음성 수신함")
+     */
+    val navigatorDefaultTaskGroupFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_NAVIGATOR_DEFAULT_TASK_GROUP] ?: "📥 토닥 음성 수신함"
+    }
+
+    suspend fun setNavigatorDefaultTaskGroup(group: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_NAVIGATOR_DEFAULT_TASK_GROUP] = group.trim().ifBlank { "📥 토닥 음성 수신함" }
+        }
     }
 
     /**

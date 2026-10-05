@@ -204,3 +204,17 @@ data class DailyRoutine(
 5. Jetpack Glance 홈 위젯 및 Ongoing 알림 서비스 연동
 6. 한국어 음성 인식(STT) 및 1-Tap 태그 입력 UI 구현
 7. APK 디바이스 빌드 및 부부 폰 연동 테스트
+
+---
+
+## 8. 변경 이력 (Change Log)
+
+### 2026-10-05: 전원 버튼 2번 초경량 음성 등록 & 마이 내비게이터(My Navigator) 연동
+* **목적**: 화면 꺼짐/잠금 상태에서도 1초 만에 음성으로 할 일을 등록하고, 파워유저(허니 오빠)의 경우 웹서버(Gantt / 인생 라이프 그래프)로 실시간 연동.
+* **주요 구현 내용**:
+  1. **`VoiceDateParser.kt`**: "오늘날짜로 ~", "내일날짜로 ~", "인생기록: ~" 등의 한국어 자연어를 분석하여 날짜/목적지/본문 자동 추출 및 서술어 트리밍.
+  2. **`QuickVoiceActivity.kt`**: 잠금화면 위에서 즉시 팝업되는 초경량 음성 입력 액티비티 (`setShowWhenLocked`, `setTurnScreenOn`, 햅틱 피드백, 1.2초 쾌속 자동 종료).
+  3. **`NavigatorSyncClient.kt`**: 마이 내비게이터 웹서버 REST API (`/api/external/gantt-task`, `/api/external/life-graph`) 비동기 전송 클라이언트 (Gantt `default_group` Inbox 필드 포함).
+  4. **`DataStoreManager.kt` & `MainScreen.kt`**: 파워유저용 마이 내비게이터 연동 ON/OFF, 서버 URL/API Key 설정 및 Gantt 기본 그룹(Default Task Group) 설정 UI 추가.
+  5. **`VoiceGuideDialog` & `[ℹ️]` 버튼**: 음성 명령 사용법 및 발화 예시(가족방/간트/인생기록)를 언제든 확인할 수 있는 정보 안내 팝업 컴포넌트 탑재.
+* **다중 사용자 UX 보존**: 일반 사용자(아내분 등)는 복잡한 서버 메뉴 없이 순수 미니멀 가족 투두로 사용하며, 파워유저 설정을 켠 폰에서만 웹서버 동기화가 활성화됨.

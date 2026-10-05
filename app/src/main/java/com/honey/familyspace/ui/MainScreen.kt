@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Refresh
@@ -183,7 +184,12 @@ fun MainScreen(
     // 주기적 잔소리 알림 설정 상태
     val reminderInterval by dataStore.reminderIntervalHoursFlow.collectAsState(initial = 2)
     val reminderNightMute by dataStore.reminderNightMuteFlow.collectAsState(initial = true)
+    val navigatorEnabled by dataStore.navigatorEnabledFlow.collectAsState(initial = false)
+    val navigatorServerUrl by dataStore.navigatorServerUrlFlow.collectAsState(initial = "")
+    val navigatorApiKey by dataStore.navigatorApiKeyFlow.collectAsState(initial = "")
+    val navigatorDefaultTaskGroup by dataStore.navigatorDefaultTaskGroupFlow.collectAsState(initial = "📥 토닥 음성 수신함")
     var showReminderSettingsDialog by remember { mutableStateOf(false) }
+    var showVoiceGuideDialog by remember { mutableStateOf(false) }
 
     // 방 삭제 관련 상태
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -399,7 +405,12 @@ fun MainScreen(
                             }
                         }
 
-                        // 3. 리마인더 알림 설정 버튼
+                        // 3. 음성 명령 안내 버튼
+                        IconButton(onClick = { showVoiceGuideDialog = true }) {
+                            Icon(Icons.Default.Info, contentDescription = "음성 명령 안내", tint = Color(currentTheme.accentHex))
+                        }
+
+                        // 4. 리마인더 알림 설정 버튼
                         IconButton(onClick = { showReminderSettingsDialog = true }) {
                             Icon(Icons.Default.Settings, contentDescription = "알림 설정", tint = Color(currentTheme.accentHex))
                         }
@@ -504,6 +515,12 @@ fun MainScreen(
                     item {
                         IconButton(onClick = { showJoinDialog = true; joinDialogCreating = true }) {
                             Icon(Icons.Default.Add, contentDescription = "새 방 추가", tint = Color(currentTheme.accentHex))
+                        }
+                    }
+
+                    item {
+                        IconButton(onClick = { showVoiceGuideDialog = true }) {
+                            Icon(Icons.Default.Info, contentDescription = "음성 명령 안내", tint = Color(currentTheme.accentHex))
                         }
                     }
 
@@ -1299,12 +1316,16 @@ fun MainScreen(
         )
     }
 
-    // 주기적 잔소리 알림 및 애칭 설정 다이얼로그
+    // 주기적 잔소리 알림 및 애칭, 마이 내비게이터 연동 설정 다이얼로그
     if (showReminderSettingsDialog) {
         var tempInterval by remember { mutableStateOf(reminderInterval) }
         var tempNightMute by remember { mutableStateOf(reminderNightMute) }
         var tempMyNick by remember { mutableStateOf(myNickname) }
         var tempPartnerNick by remember { mutableStateOf(partnerNickname) }
+        var tempNavEnabled by remember { mutableStateOf(navigatorEnabled) }
+        var tempNavUrl by remember { mutableStateOf(navigatorServerUrl) }
+        var tempNavKey by remember { mutableStateOf(navigatorApiKey) }
+        var tempNavGroup by remember { mutableStateOf(navigatorDefaultTaskGroup) }
 
         AlertDialog(
             onDismissRequest = { showReminderSettingsDialog = false },
@@ -1314,7 +1335,11 @@ fun MainScreen(
                 Text("⚙️ 공간 및 알림 설정", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(currentTheme.textColor))
             },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
                     Text("우리 애칭 설정 💖", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(currentTheme.textColor))
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("서로를 부를 애칭을 적어주시면 화면에 예쁘게 표시돼요.", fontSize = 12.sp, color = Color.Gray)
@@ -1408,6 +1433,69 @@ fun MainScreen(
                             onCheckedChange = { tempNightMute = it }
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    // 🧭 마이 내비게이터(My Navigator) 파워유저 연동 설정
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFEDE7F6), RoundedCornerShape(12.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("🧭 마이 내비게이터 연동 (파워유저)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF512DA8))
+                            Text("음성 할 일을 웹서버(Gantt / 인생그래프)로 자동 전송", fontSize = 11.sp, color = Color.Gray)
+                        }
+                        Switch(
+                            checked = tempNavEnabled,
+                            onCheckedChange = { tempNavEnabled = it }
+                        )
+                    }
+
+                    if (tempNavEnabled) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = tempNavUrl,
+                            onValueChange = { tempNavUrl = it },
+                            label = { Text("웹 서버 주소 (URL)") },
+                            placeholder = { Text("예: https://my-navigator.vercel.app") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = tempNavKey,
+                            onValueChange = { tempNavKey = it },
+                            label = { Text("API 보안 Key (선택)") },
+                            placeholder = { Text("보안 인증 키 입력") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = tempNavGroup,
+                            onValueChange = { tempNavGroup = it },
+                            label = { Text("Gantt 기본 수신 그룹 (Default Task)") },
+                            placeholder = { Text("예: 📥 토닥 음성 수신함") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // 음성 명령 안내 바로가기 버튼
+                    Button(
+                        onClick = { showVoiceGuideDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFECEFF1)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("ℹ️ 음성 명령 사용법 및 예시 보기", color = Color(0xFF37474F), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             },
             confirmButton = {
@@ -1418,9 +1506,13 @@ fun MainScreen(
                             dataStore.setPartnerNickname(tempPartnerNick.trim())
                             dataStore.setReminderIntervalHours(tempInterval)
                             dataStore.setReminderNightMute(tempNightMute)
+                            dataStore.setNavigatorEnabled(tempNavEnabled)
+                            dataStore.setNavigatorServerUrl(tempNavUrl)
+                            dataStore.setNavigatorApiKey(tempNavKey)
+                            dataStore.setNavigatorDefaultTaskGroup(tempNavGroup)
                             ReminderScheduler.scheduleReminder(context, tempInterval)
                             showReminderSettingsDialog = false
-                            val msg = if (tempInterval == 0) "설정을 저장했어요" else "${tempInterval}시간마다 남은 할 일을 알려드릴게요 ⏰"
+                            val msg = if (tempNavEnabled) "내비게이터 연동 설정이 저장되었어요 🧭" else "설정을 저장했어요 💖"
                             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                         }
                     },
@@ -1435,6 +1527,14 @@ fun MainScreen(
                     Text("취소", color = Color.Gray)
                 }
             }
+        )
+    }
+
+    // 🌟 [음성 명령 사용법 및 예시 다이얼로그 (Information)]
+    if (showVoiceGuideDialog) {
+        VoiceGuideDialog(
+            theme = currentTheme,
+            onDismiss = { showVoiceGuideDialog = false }
         )
     }
 
@@ -2049,6 +2149,101 @@ private fun JoinSpaceDialog(
         dismissButton = {
             TextButton(onClick = { isCreating = !isCreating }) {
                 Text(if (isCreating) "초대 코드로 참여하기" else "직접 새 방 만들기")
+            }
+        }
+    )
+}
+
+/**
+ * 🎙️ 한국어 음성 명령 사용 가이드 다이얼로그 (Information)
+ */
+@Composable
+private fun VoiceGuideDialog(
+    theme: ThemeColor,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = Color.White,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🎙️ 음성 명령 사용법 안내", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(theme.textColor))
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "전원 버튼을 2번 연속 누르면 화면이 켜지며 바로 음성 녹음이 시작됩니다 ⚡",
+                    fontSize = 13.sp,
+                    color = Color.DarkGray,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // 카드 1: 가족/부부 기본 할일
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("🌸 기본 가족/부부 할 일", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("• \"오늘날짜로 우유 사기 저장해줘\"", fontSize = 13.sp, color = Color(0xFF333333))
+                        Text("• \"내일 세탁소 정장 찾기 등록해줘\"", fontSize = 13.sp, color = Color(0xFF333333))
+                        Text("• \"이번주 금요일 부모님 병원 예약\"", fontSize = 13.sp, color = Color(0xFF333333))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 카드 2: 마이 내비게이터 Gantt Task (파워유저)
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEDE7F6)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("🧭 마이 내비게이터 Gantt (파워유저)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF512DA8))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("• \"내비에 오늘날짜로 배관 자재 발주 체크\"", fontSize = 13.sp, color = Color(0xFF333333))
+                        Text("• \"간트에 내일 P&ID 라인 넘버링 검토\"", fontSize = 13.sp, color = Color(0xFF333333))
+                        Text("👉 지정하신 [Gantt 기본 수신함]으로 자동 적재!", fontSize = 11.sp, color = Color(0xFF673AB7), fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 카드 3: 인생 라이프 그래프 (파워유저)
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("📈 인생 라이프 그래프 (파워유저)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("• \"인생기록: 오늘 대형 프로젝트 계약 체결!\"", fontSize = 13.sp, color = Color(0xFF333333))
+                        Text("• \"인생그래프: 배관 기술사 1차 합격!\"", fontSize = 13.sp, color = Color(0xFF333333))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "💡 팁: 문장 끝의 '~저장해줘', '~적어줘'는 앱이 알아서 깔끔하게 제거하고 등록해 드려요.",
+                    fontSize = 11.sp,
+                    color = Color.Gray
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(theme.accentHex)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("확인", color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
     )
