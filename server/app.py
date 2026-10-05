@@ -1526,8 +1526,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 16
-CURRENT_APP_VERSION_NAME = "1.6.0"
+CURRENT_APP_VERSION_CODE = 17
+CURRENT_APP_VERSION_NAME = "1.6.1"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1540,7 +1540,7 @@ def get_app_version():
         # 폴백도 같은 정식 자산을 가리킨다 — 과거에는 존재하지 않는 app-debug.apk(404) 였음.
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
-        "changelog": "🎙️ v1.6.0 음성 등록 & 스마트 연동 업데이트\n- ⚡ 전원 버튼 2번 초경량 음성 등록 (잠금화면 위 1초 저장)\n- 🧭 마이 내비게이터(Gantt / 인생 라이프 그래프) 파워유저 연동\n- ℹ️ 음성 명령 사용법 및 발화 예시 안내 추가"
+        "changelog": "🚀 v1.6.1 UI & 권한 픽스 완료\n- 🎤 메인 화면 우하단 마이크 버튼 노출 수정\n- ⚙️ 마스터 셋팅 화면 버튼 시인성 개선\n- 📱 안드로이드 측면 버튼 앱 목록에 토닥 음성 노출 권한 픽스"
     }), 200
 
 

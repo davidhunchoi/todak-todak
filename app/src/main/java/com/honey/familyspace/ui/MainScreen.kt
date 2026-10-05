@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -299,14 +300,39 @@ fun MainScreen(
         containerColor = Color(currentTheme.backgroundHex),
         floatingActionButton = {
             if (currentSpace != null) {
-                FloatingActionButton(
-                    onClick = { showAddSheet = true },
-                    containerColor = Color(currentTheme.accentHex),
-                    contentColor = Color.White,
-                    shape = CircleShape,
-                    modifier = Modifier.size(64.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "할 일 추가", modifier = Modifier.size(32.dp))
+                Column(horizontalAlignment = Alignment.End) {
+                    FloatingActionButton(
+                        onClick = { showReminderSettingsDialog = true },
+                        containerColor = Color.White,
+                        contentColor = Color.Gray,
+                        shape = CircleShape,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = "설정", modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    FloatingActionButton(
+                        onClick = {
+                            val intent = Intent(context, QuickVoiceActivity::class.java)
+                            context.startActivity(intent)
+                        },
+                        containerColor = Color.White,
+                        contentColor = Color(currentTheme.accentHex),
+                        shape = CircleShape,
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Icon(Icons.Default.Mic, contentDescription = "음성 입력", modifier = Modifier.size(28.dp))
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    FloatingActionButton(
+                        onClick = { showAddSheet = true },
+                        containerColor = Color(currentTheme.accentHex),
+                        contentColor = Color.White,
+                        shape = CircleShape,
+                        modifier = Modifier.size(64.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "할 일 추가", modifier = Modifier.size(32.dp))
+                    }
                 }
             }
         }
