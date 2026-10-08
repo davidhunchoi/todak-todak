@@ -89,3 +89,23 @@ CREATE INDEX IF NOT EXISTS idx_tasks_space ON tasks(space_id, is_completed);
 CREATE INDEX IF NOT EXISTS idx_routines_space ON routines(space_id);
 CREATE INDEX IF NOT EXISTS idx_members_user ON space_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_relink_space ON relink_codes(space_id);
+
+-- 9. 무전기(PTT) 음성 메시지 테이블
+--    - sender_id: 보낸 사람 user_id
+--    - audio_base64: AMR-NB 오디오 데이터 base64 인코딩 (최대 30초, ~600KB)
+--    - duration_ms: 녹음 길이 (밀리초)
+--    - is_played: 수신자가 재생했는지 여부 (1=재생됨)
+--    - created_at: 생성 시각 (에포크 밀리초, 24시간 후 자동 정리)
+CREATE TABLE IF NOT EXISTS walkie_messages (
+    id TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL,
+    sender_id TEXT NOT NULL,
+    audio_base64 TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    is_played INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_walkie_space ON walkie_messages(space_id, created_at);
+

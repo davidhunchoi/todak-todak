@@ -559,6 +559,21 @@ fun MainScreen(
                             Icon(Icons.Default.Settings, contentDescription = "알림 설정", tint = Color(currentTheme.accentHex))
                         }
                     }
+
+                    // 📻 1:1 무전기(PTT) 진입 버튼
+                    if (!isAllMode && currentSpace != null) {
+                        item {
+                            IconButton(onClick = {
+                                val intent = Intent(context, WalkieActivity::class.java).apply {
+                                    putExtra(WalkieActivity.EXTRA_SPACE_ID, currentSpace.id)
+                                    putExtra(WalkieActivity.EXTRA_SPACE_TITLE, currentSpace.title)
+                                }
+                                context.startActivity(intent)
+                            }) {
+                                Text(text = "📻", fontSize = 20.sp)
+                            }
+                        }
+                    }
                 }
             }
 

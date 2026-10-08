@@ -14,8 +14,8 @@ android {
         applicationId = "com.honey.familyspace"
         minSdk = 26
         targetSdk = 34
-        versionCode = 21
-        versionName = "1.6.5"
+        versionCode = 22
+        versionName = "1.6.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

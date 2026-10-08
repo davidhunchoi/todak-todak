@@ -222,6 +222,17 @@ def migrate_schema_columns(db):
             FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
         )""",
         "CREATE INDEX IF NOT EXISTS idx_relink_space ON relink_codes(space_id)",
+        # 무전기(PTT) 음성 메시지 테이블
+        """CREATE TABLE IF NOT EXISTS walkie_messages (
+            id TEXT PRIMARY KEY,
+            space_id TEXT NOT NULL,
+            sender_id TEXT NOT NULL,
+            audio_base64 TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            is_played INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_walkie_space ON walkie_messages(space_id, created_at)",
     ]
     for tbl_sql in extra_tables:
         try:
@@ -1569,8 +1580,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 21
-CURRENT_APP_VERSION_NAME = "1.6.5"
+CURRENT_APP_VERSION_CODE = 22
+CURRENT_APP_VERSION_NAME = "1.6.6"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1583,7 +1594,7 @@ def get_app_version():
         # 폴백도 같은 정식 자산을 가리킨다 — 과거에는 존재하지 않는 app-debug.apk(404) 였음.
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
-        "changelog": "🚀 v1.6.5 안정성 강화\n- 🔄 배우자 기기 재연결 및 1초 방 복구 지원\n- 🎙️ 음성 녹음 중복 저장 버그 해결\n- 🗑️ 30일 경과 완료 할 일 자동 정리"
+        "changelog": "🚀 v1.6.6 무전기 및 구글 음성 직통 탑재\n- 📻 아내와 1:1 무전기(PTT) 대화 기능\n- 🎙️ 구글 공식 음성 녹음기(Google STT) 직통 연동\n- 🧭 My Navi 방 생성 및 토닥토닥 간트차트 연동\n- 🗑️ 30일 경과 완료 할 일 자동 정리"
     }), 200
 
 
@@ -1591,6 +1602,138 @@ def get_app_version():
 def download_latest_apk():
     """최신 APK 다운로드 제공 (항상 깃허브 최신 정식 릴리스로 직통 리다이렉트)"""
     return redirect("https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk")
+
+
+# ==========================================
+# 5. 무전기(PTT) 음성 메시지 API
+# ==========================================
+# - 오디오(AMR-NB)를 base64로 인코딩해 Turso DB에 저장
+# - 24시간 경과 메시지 자동 정리
+# - Vercel 서버리스 환경에서도 동작 (파일 시스템 불사용)
+# - 최대 페이로드 약 600KB (30초 AMR-NB base64)
+
+_WALKIE_CLEANUP_INTERVAL_S = 3600  # 1시간마다 정리
+_walkie_last_cleanup = 0
+
+
+def _cleanup_walkie_if_needed(db):
+    """24시간 경과한 무전기 메시지 정리 (1시간마다 한 번)"""
+    global _walkie_last_cleanup
+    now_s = time.time()
+    if now_s - _walkie_last_cleanup < _WALKIE_CLEANUP_INTERVAL_S:
+        return
+    try:
+        cutoff = int((now_s - 86400) * 1000)  # 24시간 전 에포크 ms
+        _q(db, "DELETE FROM walkie_messages WHERE created_at < ?", (cutoff,))
+        _db_commit(db)
+        _walkie_last_cleanup = now_s
+    except Exception as e:
+        print(f"[walkie cleanup] {e}", flush=True)
+
+
+@app.route("/api/spaces/<space_id>/walkie/send", methods=["POST"])
+def walkie_send(space_id):
+    """무전기 음성 메시지 전송 (base64 오디오 데이터 저장)
+
+    Request JSON:
+    {
+      "sender_id": "user-uuid",
+      "audio_base64": "<base64 encoded AMR-NB audio>",
+      "duration_ms": 3200
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    sender_id = data.get("sender_id", "").strip()
+    audio_b64 = data.get("audio_base64", "").strip()
+    duration_ms = int(data.get("duration_ms", 0))
+
+    if not sender_id:
+        return jsonify({"error": "sender_id가 필요합니다."}), 400
+    if not audio_b64:
+        return jsonify({"error": "audio_base64가 필요합니다."}), 400
+    # 약 600KB 초과 방지 (30초 AMR-NB base64 최대치)
+    if len(audio_b64) > 900_000:
+        return jsonify({"error": "음성이 너무 깁니다. 30초 이내로 말씀해 주세요."}), 413
+
+    msg_id = str(uuid.uuid4())
+    created_at = int(time.time() * 1000)
+
+    db = get_db()
+    try:
+        _cleanup_walkie_if_needed(db)
+        _q(db, """
+            INSERT INTO walkie_messages (id, space_id, sender_id, audio_base64, duration_ms, is_played, created_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?)
+        """, (msg_id, space_id, sender_id, audio_b64, duration_ms, created_at))
+        _db_commit(db)
+        return jsonify({"id": msg_id, "created_at": created_at}), 200
+    except Exception as e:
+        print(f"[walkie send] {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+    finally:
+        _db_close(db)
+
+
+@app.route("/api/spaces/<space_id>/walkie/latest", methods=["GET"])
+def walkie_latest(space_id):
+    """내가 받아야 할 최신 무전기 메시지 조회 (상대방이 보낸 미재생 메시지)
+
+    Query params:
+    - my_user_id: 나의 user_id (상대방이 보낸 메시지만 반환)
+    - after_ms: 이 에포크(ms) 이후 메시지만 (선택, 기본 5분 전)
+    """
+    my_user_id = request.args.get("my_user_id", "").strip()
+    if not my_user_id:
+        return jsonify({"error": "my_user_id가 필요합니다."}), 400
+
+    # after_ms 미지정 시 최근 5분
+    default_after = int(time.time() * 1000) - (5 * 60 * 1000)
+    try:
+        after_ms = int(request.args.get("after_ms", default_after))
+    except (ValueError, TypeError):
+        after_ms = default_after
+
+    db = get_db()
+    try:
+        res = _q(db, """
+            SELECT id, sender_id, audio_base64, duration_ms, created_at
+            FROM walkie_messages
+            WHERE space_id = ? AND sender_id != ? AND is_played = 0 AND created_at > ?
+            ORDER BY created_at ASC
+            LIMIT 1
+        """, (space_id, my_user_id, after_ms))
+        rows = _rows(res)
+        if not rows:
+            return jsonify({"message": None}), 200
+        row = rows[0]
+        return jsonify({
+            "message": {
+                "id": _row_get(row, "id", 0),
+                "sender_id": _row_get(row, "sender_id", 1),
+                "audio_base64": _row_get(row, "audio_base64", 2),
+                "duration_ms": _row_get(row, "duration_ms", 3),
+                "created_at": _row_get(row, "created_at", 4),
+            }
+        }), 200
+    except Exception as e:
+        print(f"[walkie latest] {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+    finally:
+        _db_close(db)
+
+
+@app.route("/api/spaces/<space_id>/walkie/<msg_id>/played", methods=["POST"])
+def walkie_mark_played(space_id, msg_id):
+    """무전기 메시지 재생 완료 표시 (is_played = 1 로 변경)"""
+    db = get_db()
+    try:
+        _q(db, "UPDATE walkie_messages SET is_played = 1 WHERE id = ? AND space_id = ?", (msg_id, space_id))
+        _db_commit(db)
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        _db_close(db)
 
 
 if __name__ == "__main__":

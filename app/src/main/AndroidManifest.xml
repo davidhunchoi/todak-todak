@@ -123,6 +123,14 @@
             android:launchMode="singleTask"
             android:excludeFromRecents="true" />
 
+        <!-- 무전기(PTT) 액티비티 -->
+        <activity
+            android:name=".ui.WalkieActivity"
+            android:label="토닥 무전기"
+            android:exported="false"
+            android:theme="@style/Theme.FamilySpaceTodo" />
+
+
         <!-- 다운로드된 APK 설치를 위한 FileProvider -->
         <provider
             android:name="androidx.core.content.FileProvider"
