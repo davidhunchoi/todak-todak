@@ -44,11 +44,14 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -156,6 +159,13 @@ class QuickVoiceActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    companion object {
+        const val EXTRA_SPACE_ID = "extra_space_id"
+    }
+
+    // 음성 저장 대상 방 (메인에서 전달된 방 우선, 없으면 활성 방)
+    private val selectedSpaceId = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -177,9 +187,15 @@ class QuickVoiceActivity : ComponentActivity() {
             requestAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
 
+        // 5. 저장 대상 방: 메인에서 넘긴 방 ID 우선
+        selectedSpaceId.value = intent.getStringExtra(EXTRA_SPACE_ID)?.takeIf { it.isNotBlank() }
+
         setContent {
             QuickVoiceScreen(
                 hasAudioPermission = hasAudioPermission.value,
+                dataStoreManager = dataStoreManager,
+                selectedSpaceId = selectedSpaceId.value,
+                onSpaceSelected = { selectedSpaceId.value = it },
                 onRequestPermission = {
                     requestAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 },
@@ -234,15 +250,19 @@ class QuickVoiceActivity : ComponentActivity() {
                     return@launch
                 }
 
-                // 활성 스페이스 확인 (없으면 첫 번째 스페이스 사용, 그래도 없으면 자동 생성)
-                var spaceId = dataStoreManager.activeSpaceIdFlow.first()
+                // 저장 대상 방: 사용자가 고른 방 > 메인에서 넘긴 방 > 활성 방 > 첫 번째 방 > 자동 생성
+                var spaceId = selectedSpaceId.value?.takeIf { it.isNotBlank() }
+                    ?: dataStoreManager.activeSpaceIdFlow.first()
                 if (spaceId.isNullOrBlank()) {
                     val spaceRepo = SpaceRepository(dataStoreManager)
                     val spaces = spaceRepo.observeMySpaces().first()
                     if (spaces.isNotEmpty()) {
                         spaceId = spaces[0].id
-                        dataStoreManager.setActiveSpaceId(spaceId)
                     }
+                }
+                if (!spaceId.isNullOrBlank()) {
+                    selectedSpaceId.value = spaceId
+                    dataStoreManager.setActiveSpaceId(spaceId)
                 }
                 if (spaceId.isNullOrBlank()) {
                     // 첫 설치 등 방이 전혀 없는 경우: 가짜 성공 대신 기본 방을 만들어 저장 보장
@@ -371,6 +391,9 @@ class QuickVoiceActivity : ComponentActivity() {
 @Composable
 fun QuickVoiceScreen(
     hasAudioPermission: Boolean,
+    dataStoreManager: DataStoreManager? = null,
+    selectedSpaceId: String? = null,
+    onSpaceSelected: ((String) -> Unit)? = null,
     onRequestPermission: () -> Unit,
     onStartListening: (onPartial: (String) -> Unit, onResult: (String) -> Unit, onError: (String) -> Unit) -> Unit,
     onStopListening: () -> Unit,
@@ -384,6 +407,13 @@ fun QuickVoiceScreen(
     var errorMessage by remember { mutableStateOf("") }
     var listenStartMs by remember { mutableStateOf(0L) }
     var elapsedSec by remember { mutableStateOf(0) }
+    var spaceDropdownExpanded by remember { mutableStateOf(false) }
+    val spaceRepo = remember(dataStoreManager) { dataStoreManager?.let { SpaceRepository(it) } }
+    val spaces by spaceRepo?.observeMySpaces()?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
+    val effectiveSpaceId = selectedSpaceId?.takeIf { it.isNotBlank() }
+        ?: spaces.firstOrNull()?.id
+    val effectiveSpaceTitle = spaces.firstOrNull { it.id == effectiveSpaceId }?.title
+        ?: if (spaces.isNotEmpty()) spaces[0].title else "저장할 방 선택"
 
     // 펄스 애니메이션
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -471,6 +501,41 @@ fun QuickVoiceScreen(
                 ) {
                     when (state) {
                         QuickVoiceState.LISTENING -> {
+                            // 저장 대상 방 선택 (방 2개 이상이면 변경 가능)
+                            if (spaces.size > 1) {
+                                Box {
+                                    Button(
+                                        onClick = { spaceDropdownExpanded = true },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color.White.copy(alpha = 0.12f)
+                                        )
+                                    ) {
+                                        Text("📁 $effectiveSpaceTitle ▾", color = Color.White, fontSize = 13.sp)
+                                    }
+                                    DropdownMenu(
+                                        expanded = spaceDropdownExpanded,
+                                        onDismissRequest = { spaceDropdownExpanded = false }
+                                    ) {
+                                        spaces.forEach { s ->
+                                            DropdownMenuItem(
+                                                text = { Text(s.title) },
+                                                onClick = {
+                                                    spaceDropdownExpanded = false
+                                                    onSpaceSelected?.invoke(s.id)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
+                            } else if (spaces.size == 1) {
+                                Text(
+                                    text = "📁 ${spaces[0].title}에 저장",
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 13.sp
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
                             Box(
                                 modifier = Modifier
                                     .size(80.dp)

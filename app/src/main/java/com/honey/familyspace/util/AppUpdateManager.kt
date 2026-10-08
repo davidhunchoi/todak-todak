@@ -333,7 +333,7 @@ object AppUpdateManager {
         val currentVersion = installedVersionCode(context)
         if (newVersion != null && currentVersion != null && newVersion <= currentVersion) {
             try { file.delete() } catch (e: Exception) {}
-            Toast.makeText(context, "이미 최신 버전이 설치되어 있어요. 😊", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "이미 최신 버전이 설치되어 있어요. (설치됨 v$currentVersion / 다운로드 v$newVersion) 😊", Toast.LENGTH_LONG).show()
             return
         }
 

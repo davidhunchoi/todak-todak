@@ -314,6 +314,9 @@ fun MainScreen(
                     FloatingActionButton(
                         onClick = {
                             val intent = Intent(context, QuickVoiceActivity::class.java)
+                            currentSpace?.id?.takeIf { it.isNotBlank() }?.let {
+                                intent.putExtra(QuickVoiceActivity.EXTRA_SPACE_ID, it)
+                            }
                             context.startActivity(intent)
                         },
                         containerColor = Color.White,
