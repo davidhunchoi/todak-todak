@@ -8,6 +8,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -102,7 +104,16 @@ fun MainScreen(
     val view = LocalView.current
     val scope = rememberCoroutineScope()
 
-    val mySpaces by spaceRepo.observeMySpaces().collectAsState()
+    val navigatorEnabled by dataStore.navigatorEnabledFlow.collectAsState(initial = false)
+    val rawSpaces by spaceRepo.observeMySpaces().collectAsState()
+    // 마이 내비게이터(My Navi) 방은 파워유저 설정(navigatorEnabled)이 켜져 있을 때만 노출
+    val mySpaces = remember(rawSpaces, navigatorEnabled) {
+        if (navigatorEnabled) {
+            rawSpaces
+        } else {
+            rawSpaces.filterNot { it.id == SpaceRepository.MY_NAVI_SPACE_ID || it.title == SpaceRepository.MY_NAVI_TITLE }
+        }
+    }
     val activeSpaceId by dataStore.activeSpaceIdFlow.collectAsState(initial = null)
     val myNickname by dataStore.myNicknameFlow.collectAsState(initial = "나")
     val partnerNickname by dataStore.partnerNicknameFlow.collectAsState(initial = "짝꿍")
@@ -185,7 +196,6 @@ fun MainScreen(
     // 주기적 잔소리 알림 설정 상태
     val reminderInterval by dataStore.reminderIntervalHoursFlow.collectAsState(initial = 2)
     val reminderNightMute by dataStore.reminderNightMuteFlow.collectAsState(initial = true)
-    val navigatorEnabled by dataStore.navigatorEnabledFlow.collectAsState(initial = false)
     val navigatorServerUrl by dataStore.navigatorServerUrlFlow.collectAsState(initial = "")
     val navigatorApiKey by dataStore.navigatorApiKeyFlow.collectAsState(initial = "")
     val navigatorDefaultTaskGroup by dataStore.navigatorDefaultTaskGroupFlow.collectAsState(initial = "📥 토닥 음성 수신함")
@@ -246,7 +256,9 @@ fun MainScreen(
         launch {
             try {
                 spaceRepo.syncSpacesFromServer()
-                spaceRepo.ensureMyNaviSpace()
+                if (navigatorEnabled) {
+                    spaceRepo.ensureMyNaviSpace()
+                }
             } finally {
                 isInitialLoading = false
             }
@@ -366,94 +378,130 @@ fun MainScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // 1. 적응형 상단 헤더 (방이 1개일 땐 단일 헤더, 2개 이상일 땐 알약 탭)
-            if (mySpaces.size <= 1) {
+            // 1. 상시 고정 상단 헤더 (현재 방 제목 + 핵심 액션 버튼 상시 노출)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 좌측: 현재 방 이름
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f, fill = false)
-                    ) {
-                        Text(
-                            text = "🏠 ${currentSpace?.title ?: "우리 공간"}",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(currentTheme.textColor),
-                            modifier = Modifier.combinedClickable(
-                                onClick = {
-                                    // 방 이름 터치 시 방 이름 변경 팝업
+                    val displayTitle = if (isAllMode) "🌈 전체보기" else (currentSpace?.title ?: "우리 공간")
+                    Text(
+                        text = if (isAllMode) displayTitle else "🏠 $displayTitle",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(currentTheme.textColor),
+                        modifier = Modifier.combinedClickable(
+                            onClick = {
+                                if (!isAllMode) {
                                     currentSpace?.let { space ->
                                         renameTargetSpace = space
                                         renameInputText = space.title
                                         showRenameDialog = true
                                     }
-                                },
-                                onLongClick = {
-                                    // 방 이름 길게 누르기 → 방 관리(수정/삭제) 통합 팝업
+                                }
+                            },
+                            onLongClick = {
+                                if (!isAllMode) {
                                     currentSpace?.let { space ->
                                         actionTargetSpace = space
                                         showSpaceActionDialog = true
                                     }
                                 }
-                            )
+                            }
                         )
-                    }
+                    )
+                }
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // 0. 즉시 새로고침 버튼 (원터치 갱신)
-                        IconButton(onClick = triggerRefresh) {
-                            Icon(Icons.Default.Refresh, contentDescription = "새로고침", tint = Color(currentTheme.accentHex))
-                        }
-
-                        // 1. 초대 코드 입력 버튼
-                        IconButton(onClick = {
-                            joinDialogCreating = false
-                            joinError = null
-                            showJoinDialog = true
-                        }) {
-                            Icon(Icons.Default.Key, contentDescription = "초대 코드 입력", tint = Color(currentTheme.accentHex))
-                        }
-
-                        // 2. 방 초대하기 버튼 (2명 한정 원칙 검증)
-                        if (currentSpace != null) {
-                            IconButton(onClick = {
-                                if (currentSpace.memberCount >= 2) {
-                                    showMemberLimitDialog = true
-                                } else {
-                                    scope.launch {
-                                        spaceRepo.getOrRefreshInviteCode(currentSpace.id).onSuccess { code ->
-                                            generatedCode = code
-                                            showInviteDialog = true
-                                        }
-                                    }
+                // 우측: 상시 고정 액션 버튼 그룹
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 1) 📻 무전기(PTT) 버튼: 1:1 방일 때 선명한 배지 스타일로 상시 노출!
+                    if (!isAllMode && currentSpace != null) {
+                        Surface(
+                            onClick = {
+                                val intent = Intent(context, WalkieActivity::class.java).apply {
+                                    putExtra(WalkieActivity.EXTRA_SPACE_ID, currentSpace.id)
+                                    putExtra(WalkieActivity.EXTRA_SPACE_TITLE, currentSpace.title)
                                 }
-                            }) {
-                                Icon(Icons.Default.PersonAdd, contentDescription = "초대하기", tint = Color(currentTheme.accentHex))
+                                context.startActivity(intent)
+                            },
+                            color = Color(currentTheme.accentHex).copy(alpha = 0.18f),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.padding(end = 2.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Text(text = "📻", fontSize = 15.sp)
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "무전기",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(currentTheme.accentHex)
+                                )
                             }
                         }
+                    }
 
-                        // 3. 음성 명령 안내 버튼
-                        IconButton(onClick = { showVoiceGuideDialog = true }) {
-                            Icon(Icons.Default.Info, contentDescription = "음성 명령 안내", tint = Color(currentTheme.accentHex))
-                        }
+                    // 2) ➕ 새 방 추가: 혼자만의 방, 어머니와의 방 언제든 1초 생성!
+                    IconButton(onClick = { showJoinDialog = true; joinDialogCreating = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "새 방 추가", tint = Color(currentTheme.accentHex))
+                    }
 
-                        // 4. 리마인더 알림 설정 버튼
-                        IconButton(onClick = { showReminderSettingsDialog = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = "알림 설정", tint = Color(currentTheme.accentHex))
+                    // 3) 🔑 초대 코드 입력 버튼
+                    IconButton(onClick = {
+                        joinDialogCreating = false
+                        joinError = null
+                        showJoinDialog = true
+                    }) {
+                        Icon(Icons.Default.Key, contentDescription = "초대 코드 입력", tint = Color(currentTheme.accentHex))
+                    }
+
+                    // 4) 👤+ 방 초대하기 버튼 (현재 1:1 방일 때)
+                    if (currentSpace != null && !isAllMode) {
+                        IconButton(onClick = {
+                            if (currentSpace.memberCount >= 2) {
+                                showMemberLimitDialog = true
+                            } else {
+                                scope.launch {
+                                    spaceRepo.getOrRefreshInviteCode(currentSpace.id).onSuccess { code ->
+                                        generatedCode = code
+                                        showInviteDialog = true
+                                    }
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Default.PersonAdd, contentDescription = "방 초대하기", tint = Color(currentTheme.accentHex))
                         }
                     }
+
+                    // 5) ⚙️ 알림 및 공간 설정 버튼
+                    IconButton(onClick = { showReminderSettingsDialog = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "알림 설정", tint = Color(currentTheme.accentHex))
+                    }
+
+                    // 6) 🔄 원터치 새로고침 버튼
+                    IconButton(onClick = triggerRefresh) {
+                        Icon(Icons.Default.Refresh, contentDescription = "새로고침", tint = Color(currentTheme.accentHex))
+                    }
                 }
-            } else {
-                // 다중 스페이스 알약 탭 (맨 앞에 [🌈 전체보기] 탭 제공)
+            }
+
+            // 2. 다중 스페이스 알약 탭 (방이 2개 이상일 때만 하단에 방 전환 알약 탭 단독 노출)
+            if (mySpaces.size > 1) {
+                Spacer(modifier = Modifier.height(10.dp))
                 LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // 🌈 전체보기 탭 (방 2개 이상일 때)
+                    // 🌈 전체보기 탭
                     item {
                         val isSelected = isAllMode
                         Box(
@@ -465,11 +513,11 @@ fun MainScreen(
                                 .clickable {
                                     scope.launch { dataStore.setActiveSpaceId("ALL") }
                                 }
-                                .padding(horizontal = 18.dp, vertical = 10.dp)
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
                         ) {
                             Text(
                                 text = "🌈 전체보기",
-                                fontSize = 15.sp,
+                                fontSize = 14.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isSelected) Color.White else Color(0xFF666666)
                             )
@@ -495,83 +543,14 @@ fun MainScreen(
                                         showSpaceActionDialog = true
                                     }
                                 )
-                                .padding(horizontal = 18.dp, vertical = 10.dp)
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
                         ) {
                             Text(
                                 text = space.title,
-                                fontSize = 15.sp,
+                                fontSize = 14.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isSelected) Color.White else Color(0xFF666666)
                             )
-                        }
-                    }
-
-                    // 상단 원터치 새로고침 버튼
-                    item {
-                        IconButton(onClick = triggerRefresh) {
-                            Icon(Icons.Default.Refresh, contentDescription = "새로고침", tint = Color(currentTheme.accentHex))
-                        }
-                    }
-
-                    item {
-                        IconButton(onClick = {
-                            joinDialogCreating = false
-                            joinError = null
-                            showJoinDialog = true
-                        }) {
-                            Icon(Icons.Default.Key, contentDescription = "초대 코드 입력", tint = Color(currentTheme.accentHex))
-                        }
-                    }
-
-                    item {
-                        IconButton(onClick = {
-                            currentSpace?.let { space ->
-                                if (space.memberCount >= 2) {
-                                    showMemberLimitDialog = true
-                                } else {
-                                    scope.launch {
-                                        spaceRepo.getOrRefreshInviteCode(space.id).onSuccess { code ->
-                                            generatedCode = code
-                                            showInviteDialog = true
-                                        }
-                                    }
-                                }
-                            }
-                        }) {
-                            Icon(Icons.Default.PersonAdd, contentDescription = "방 초대하기", tint = Color(currentTheme.accentHex))
-                        }
-                    }
-
-                    item {
-                        IconButton(onClick = { showJoinDialog = true; joinDialogCreating = true }) {
-                            Icon(Icons.Default.Add, contentDescription = "새 방 추가", tint = Color(currentTheme.accentHex))
-                        }
-                    }
-
-                    item {
-                        IconButton(onClick = { showVoiceGuideDialog = true }) {
-                            Icon(Icons.Default.Info, contentDescription = "음성 명령 안내", tint = Color(currentTheme.accentHex))
-                        }
-                    }
-
-                    item {
-                        IconButton(onClick = { showReminderSettingsDialog = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = "알림 설정", tint = Color(currentTheme.accentHex))
-                        }
-                    }
-
-                    // 📻 1:1 무전기(PTT) 진입 버튼
-                    if (!isAllMode && currentSpace != null) {
-                        item {
-                            IconButton(onClick = {
-                                val intent = Intent(context, WalkieActivity::class.java).apply {
-                                    putExtra(WalkieActivity.EXTRA_SPACE_ID, currentSpace.id)
-                                    putExtra(WalkieActivity.EXTRA_SPACE_TITLE, currentSpace.title)
-                                }
-                                context.startActivity(intent)
-                            }) {
-                                Text(text = "📻", fontSize = 20.sp)
-                            }
                         }
                     }
                 }
@@ -1221,26 +1200,45 @@ fun MainScreen(
         )
     }
 
-    // 🌟 [1:1 방 2명 한정 안내 다이얼로그]
+    // 🌟 [1:1 방 2명 한정 및 배우자 재연결 안내 다이얼로그]
     if (showMemberLimitDialog) {
         AlertDialog(
             onDismissRequest = { showMemberLimitDialog = false },
-            title = { Text("👥 1:1 방 인원 안내", fontWeight = FontWeight.Bold) },
+            title = { Text("👥 1:1 방 인원 및 재연결 안내", fontWeight = FontWeight.Bold) },
             text = {
-                Text(
-                    "⚠️ '${currentSpace?.title}' 방은 이미 2명이 함께하고 있어요.\n\n" +
-                    "토닥토닥은 둘만의 약속을 소중히 지키기 위한 1:1 공간으로 설계되었습니다.\n\n" +
-                    "다른 가족이나 친구와 함께하시려면 상단의 [+] 버튼을 눌러 새로운 방을 만들어 초대해 주세요! 🌸",
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
-                )
+                Column {
+                    Text(
+                        "⚠️ '${currentSpace?.title}' 방은 이미 2명이 함께하고 있어요.\n\n" +
+                        "새로운 가족이나 친구와 함께하시려면 상단의 [+] 버튼으로 새 방을 만들어 주세요 🌸\n\n" +
+                        "📱 만약 배우자 스마트폰을 바꾸셨거나 앱을 재설치하셨다면, 아래 [배우자 재연결 코드 발급]을 눌러 4자리 코드를 전달해 주시면 상대방이 바로 다시 방에 연결됩니다!",
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp
+                    )
+                }
             },
             confirmButton = {
-                Button(
-                    onClick = { showMemberLimitDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(currentTheme.accentHex))
-                ) {
-                    Text("확인", color = Color.White)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            showMemberLimitDialog = false
+                            currentSpace?.let { space ->
+                                scope.launch {
+                                    spaceRepo.getOrRefreshInviteCode(space.id).onSuccess { code ->
+                                        generatedCode = code
+                                        showInviteDialog = true
+                                    }.onFailure { e ->
+                                        Toast.makeText(context, e.message ?: "코드 발급 실패", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(currentTheme.accentHex))
+                    ) {
+                        Text("📱 배우자 재연결 코드 발급", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(onClick = { showMemberLimitDialog = false }) {
+                        Text("닫기", color = Color.Gray)
+                    }
                 }
             }
         )
@@ -1383,6 +1381,7 @@ fun MainScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
                         .padding(vertical = 4.dp)
                 ) {
                     Text("우리 애칭 설정 💖", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(currentTheme.textColor))
@@ -2169,6 +2168,12 @@ private fun JoinSpaceDialog(
                         },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "📱 폰 교체/재설치 시 전달받은 배우자 재연결 코드도 여기에 입력하시면 기존 방으로 즉시 연결됩니다 🌸",
+                        fontSize = 12.sp,
+                        color = Color.Gray
                     )
                 }
             }

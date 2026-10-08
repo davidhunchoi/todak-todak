@@ -176,11 +176,10 @@ class QuickVoiceActivity : ComponentActivity() {
                 // 백그라운드 서버 동기화
                 taskRepository.syncTasksFromServer(spaceId)
 
-                // My Navigator 웹 서버 동기화 ('My Navi' 방이거나 내비 활성화 시)
+                // My Navigator 웹 서버 동기화 (파워유저 설정에서 내비 연동이 켜져 있을 때만 전송)
                 val isNavEnabled = dataStoreManager.navigatorEnabledFlow.first()
-                val isMyNaviRoom = spaceId == SpaceRepository.MY_NAVI_SPACE_ID
                 var navMsg = ""
-                if (isNavEnabled || isMyNaviRoom) {
+                if (isNavEnabled) {
                     val syncSuccess = navigatorSyncClient.syncParsedVoiceData(parsed)
                     navMsg = if (syncSuccess) " · 🧭내비 연동됨" else ""
                 }

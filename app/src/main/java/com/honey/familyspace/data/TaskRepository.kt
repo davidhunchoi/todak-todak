@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -140,18 +141,21 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
             client.newCall(request).execute()
         } catch (e: Exception) {}
 
-        // 🌟 My Navi 방 할 일 등록 시 마이 내비게이터(My Navigator) 웹 서버로도 자동 전송
+        // 🌟 My Navi 방 할 일 등록 시 마이 내비게이터(My Navigator) 웹 서버로도 자동 전송 (설정 켜진 경우에만)
         if (spaceId == SpaceRepository.MY_NAVI_SPACE_ID) {
             try {
                 dataStore?.let { ds ->
-                    val navClient = NavigatorSyncClient(ds)
-                    val parseResult = com.honey.familyspace.util.VoiceParseResult(
-                        content = title,
-                        targetDate = dueDate,
-                        targetType = com.honey.familyspace.util.VoiceTargetType.NAVIGATOR_GANTT,
-                        rawText = title
-                    )
-                    navClient.syncParsedVoiceData(parseResult)
+                    val isNavEnabled = ds.navigatorEnabledFlow.first()
+                    if (isNavEnabled) {
+                        val navClient = NavigatorSyncClient(ds)
+                        val parseResult = com.honey.familyspace.util.VoiceParseResult(
+                            content = title,
+                            targetDate = dueDate,
+                            targetType = com.honey.familyspace.util.VoiceTargetType.NAVIGATOR_GANTT,
+                            rawText = title
+                        )
+                        navClient.syncParsedVoiceData(parseResult)
+                    }
                 }
             } catch (e: Exception) {}
         }

@@ -1580,8 +1580,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 22
-CURRENT_APP_VERSION_NAME = "1.6.6"
+CURRENT_APP_VERSION_CODE = 23
+CURRENT_APP_VERSION_NAME = "1.6.7"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1594,7 +1594,7 @@ def get_app_version():
         # 폴백도 같은 정식 자산을 가리킨다 — 과거에는 존재하지 않는 app-debug.apk(404) 였음.
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
-        "changelog": "🚀 v1.6.6 무전기 및 구글 음성 직통 탑재\n- 📻 아내와 1:1 무전기(PTT) 대화 기능\n- 🎙️ 구글 공식 음성 녹음기(Google STT) 직통 연동\n- 🧭 My Navi 방 생성 및 토닥토닥 간트차트 연동\n- 🗑️ 30일 경과 완료 할 일 자동 정리"
+        "changelog": "🚀 v1.6.7 무전기 상시 노출 및 편의성 대폭 개선\n- 📻 1:1 무전기(PTT) 버튼 상단 고정\n- ➕ 혼자만의 방/어머니 방 추가 버튼 복원\n- 📱 배우자 스마트폰 재연결 코드 발급 지원\n- 🧭 My Navi 파워유저 격리 (일반 사용자 방 분리)\n- ⚙️ 큰 글꼴 설정 시 팝업 세로 스크롤 완벽 지원"
     }), 200
 
 
