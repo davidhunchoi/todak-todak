@@ -71,15 +71,15 @@ class DataStoreManager(val context: Context) {
     }
 
     /**
-     * 마이 내비게이터 Gantt 기본 수신 그룹명 (기본값: "📥 토닥 음성 수신함")
+     * 마이 내비게이터 Gantt 기본 프로젝트명 (기본값: "토닥토닥")
      */
     val navigatorDefaultTaskGroupFlow: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_NAVIGATOR_DEFAULT_TASK_GROUP] ?: "📥 토닥 음성 수신함"
+        prefs[KEY_NAVIGATOR_DEFAULT_TASK_GROUP] ?: "토닥토닥"
     }
 
     suspend fun setNavigatorDefaultTaskGroup(group: String) {
         context.dataStore.edit { prefs ->
-            prefs[KEY_NAVIGATOR_DEFAULT_TASK_GROUP] = group.trim().ifBlank { "📥 토닥 음성 수신함" }
+            prefs[KEY_NAVIGATOR_DEFAULT_TASK_GROUP] = group.trim().ifBlank { "토닥토닥" }
         }
     }
 

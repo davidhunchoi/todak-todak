@@ -294,10 +294,11 @@ class QuickVoiceActivity : ComponentActivity() {
                     return@launch
                 }
 
-                // 2) 파워유저 마이 내비게이터 연동 체크
+                // 2) 파워유저 마이 내비게이터 연동 체크 (연동 ON 또는 My Navi 방 대상)
                 val isNavEnabled = dataStoreManager.navigatorEnabledFlow.first()
+                val isMyNaviRoom = spaceId == SpaceRepository.MY_NAVI_SPACE_ID
                 var syncMessage = ""
-                if (isNavEnabled) {
+                if (isNavEnabled || isMyNaviRoom) {
                     val syncSuccess = navigatorSyncClient.syncParsedVoiceData(parsed)
                     syncMessage = when (parsed.targetType) {
                         VoiceTargetType.LIFE_GRAPH -> if (syncSuccess) "📈 인생 그래프 전송 완료" else "📈 인생 그래프 전송 대기"

@@ -25,6 +25,9 @@ import java.util.concurrent.TimeUnit
 class SpaceRepository(private val dataStore: DataStoreManager? = null) {
 
     companion object {
+        const val MY_NAVI_SPACE_ID = "space_my_navi_poweruser"
+        const val MY_NAVI_TITLE = "🧭 My Navi"
+
         private const val BASE_URL = "https://todak-todak-ruby.vercel.app"
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
@@ -34,6 +37,29 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
             .build()
 
         private val spacesStateFlow = MutableStateFlow<List<Space>>(emptyList())
+    }
+
+    /**
+     * 오빠만의 단독 개인/업무용 My Navi 방 보장 (아내와 분리된 1인 전용 방)
+     */
+    suspend fun ensureMyNaviSpace(): Space = withContext(Dispatchers.IO) {
+        val myUid = ensureAnonymousAuth()
+        val current = spacesStateFlow.value
+        val existing = current.find { it.id == MY_NAVI_SPACE_ID || it.title == MY_NAVI_TITLE }
+        if (existing != null) return@withContext existing
+
+        val naviSpace = Space(
+            id = MY_NAVI_SPACE_ID,
+            title = MY_NAVI_TITLE,
+            themeColor = ThemeColor.PURPLE.name,
+            memberUids = listOf(myUid),
+            createdBy = myUid,
+            createdAt = System.currentTimeMillis()
+        )
+        val updated = current + naviSpace
+        spacesStateFlow.value = updated
+        dataStore?.context?.let { saveSpacesToCache(it, updated) }
+        naviSpace
     }
 
     init {
@@ -210,8 +236,9 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
      */
     suspend fun getOrRefreshInviteCode(spaceId: String): Result<String> = withContext(Dispatchers.IO) {
         try {
+            val myUid = ensureAnonymousAuth()
             val request = Request.Builder()
-                .url("$BASE_URL/api/spaces/$spaceId/invite")
+                .url("$BASE_URL/api/spaces/$spaceId/invite?user_id=$myUid")
                 .get()
                 .build()
 

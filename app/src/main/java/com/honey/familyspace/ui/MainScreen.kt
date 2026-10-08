@@ -246,6 +246,7 @@ fun MainScreen(
         launch {
             try {
                 spaceRepo.syncSpacesFromServer()
+                spaceRepo.ensureMyNaviSpace()
             } finally {
                 isInitialLoading = false
             }

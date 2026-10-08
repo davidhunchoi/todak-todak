@@ -41,13 +41,20 @@ class NavigatorSyncClient(private val dataStoreManager: DataStoreManager) {
                 else -> "$serverUrl/api/external/gantt-task"
             }
 
+            val targetProject = defaultGroup.ifBlank { "토닥토닥" }
+
             val jsonPayload = JSONObject().apply {
                 put("title", parseResult.content)
                 put("content", parseResult.content)
                 put("target_date", parseResult.targetDate)
                 put("target_type", parseResult.targetType.name)
-                put("default_group", defaultGroup)
-                put("parent_task", defaultGroup)
+                // 🌟 아무 프로젝트에 섞이지 않고 '토닥토닥' 간트 차트로 직행 (없으면 자동 생성)
+                put("project_name", targetProject)
+                put("project", targetProject)
+                put("default_group", targetProject)
+                put("parent_task", targetProject)
+                put("task_group", targetProject)
+                put("auto_create_project", true)
                 put("raw_text", parseResult.rawText)
                 put("source", "todak_quick_voice")
                 put("timestamp", System.currentTimeMillis())

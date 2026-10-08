@@ -126,6 +126,7 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
         // 백그라운드 서버 전송
         try {
             val jsonBody = JSONObject().apply {
+                put("id", taskId)
                 put("title", title)
                 put("due_date", dueDate)
                 put("user_id", myUserId())
@@ -138,6 +139,22 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
                 .build()
             client.newCall(request).execute()
         } catch (e: Exception) {}
+
+        // 🌟 My Navi 방 할 일 등록 시 마이 내비게이터(My Navigator) 웹 서버로도 자동 전송
+        if (spaceId == SpaceRepository.MY_NAVI_SPACE_ID) {
+            try {
+                dataStore?.let { ds ->
+                    val navClient = NavigatorSyncClient(ds)
+                    val parseResult = com.honey.familyspace.util.VoiceParseResult(
+                        content = title,
+                        targetDate = dueDate,
+                        targetType = com.honey.familyspace.util.VoiceTargetType.NAVIGATOR_GANTT,
+                        rawText = title
+                    )
+                    navClient.syncParsedVoiceData(parseResult)
+                }
+            } catch (e: Exception) {}
+        }
 
         Result.success(newTask)
     }
@@ -315,11 +332,25 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
                 }
             }
 
-            flow.value = syncedList
-            // 서버에 없는 로컬 전용(오프라인 음성 저장분)은 앞에 보존
-            val serverIds = syncedList.map { it.id }.toSet()
-            val localsOnly = localBeforeSync.filter { it.id !in serverIds }
-            val merged = localsOnly + syncedList
+            val thirtyDaysMs = 30L * 24 * 60 * 60 * 1000
+            val nowMs = System.currentTimeMillis()
+
+            // 서버 목록 중 30일 지난 완료 건 필터링
+            val filteredSynced = syncedList.filter { t ->
+                if (!t.isCompleted) true
+                else {
+                    val compAt = t.completedAt ?: t.createdAt
+                    (nowMs - compAt) < thirtyDaysMs
+                }
+            }
+
+            // 서버에 없는 로컬 전용 항목 병합 시, 동일한 id 또는 (제목+마감일) 중복 제거
+            val serverIds = filteredSynced.map { it.id }.toSet()
+            val serverKeys = filteredSynced.map { "${it.title.trim()}_${it.dueDate.trim()}" }.toSet()
+            val localsOnly = localBeforeSync.filter {
+                it.id !in serverIds && "${it.title.trim()}_${it.dueDate.trim()}" !in serverKeys
+            }
+            val merged = localsOnly + filteredSynced
             flow.value = merged
             dataStore?.context?.let { saveTasksToCache(it, spaceId, merged) }
 

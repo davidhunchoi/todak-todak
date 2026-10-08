@@ -730,24 +730,53 @@ def update_space(space_id):
 
 @app.route("/api/spaces/<space_id>/invite", methods=["GET"])
 def get_space_invite(space_id):
-    """스페이스의 유효한 초대 코드 조회 (1:1 2명 한정 검증 및 30분 만료)"""
+    """스페이스의 유효한 초대 코드 조회 (1:1 2명 한정 검증 및 30분 만료, 재연결 지원)"""
     db = get_db()
     try:
         now_ms = int(time.time() * 1000)
 
-        # 1. 스페이스 존재 및 멤버 수(2명 한정) 확인
+        # 1. 스페이스 존재 확인
         s_res = _q(db, "SELECT id, title FROM spaces WHERE id = ?", (space_id,))
         s_rows = _rows(s_res)
         if not s_rows:
             return jsonify({"error": "존재하지 않는 스페이스입니다."}), 404
 
-        m_res = _q(db, "SELECT COUNT(*) FROM space_members WHERE space_id = ?", (space_id,))
-        m_count = _cell(m_res) or 0
+        m_res = _q(db, "SELECT user_id FROM space_members WHERE space_id = ?", (space_id,))
+        m_rows = _rows(m_res)
+        m_count = len(m_rows)
+
+        # 2. 이미 2명이 찬 방의 경우: 앱 데이터 삭제/재설치한 배우자가 다시 들어올 수 있도록 '기기 재연결 코드' 발급
         if m_count >= 2:
-            return jsonify({
-                "error": "이미 2명이 모두 연결된 오붓한 공간이에요 🌸\n새로운 분과 함께하시려면 [+ 새 방 만들기]로 새로운 1:1 방을 만들어 보세요!",
-                "is_full": True
-            }), 400
+            req_user_id = request.args.get("user_id") or ""
+            member_ids = [_row_get(r, "user_id", 0) for r in m_rows]
+
+            # 요청자가 멤버라면 상대방 멤버의 자리를 이전하도록 지정
+            if req_user_id in member_ids:
+                old_uid = [uid for uid in member_ids if uid != req_user_id][0]
+            else:
+                old_uid = member_ids[0]
+
+            # 기존 유효한 재연결 코드가 있으면 재사용
+            rc_rows = _rows(_q(db,
+                "SELECT code, expires_at FROM relink_codes WHERE space_id = ? AND expires_at > ?",
+                (space_id, now_ms)
+            ))
+            if rc_rows:
+                raw = _row_get(rc_rows[0], "code", 0)
+                expires_at = _row_get(rc_rows[0], "expires_at", 1)
+                remaining = max(1, int((expires_at - now_ms) / 60000))
+                return jsonify({"invite_code": raw, "expires_in_minutes": remaining, "is_relink": True}), 200
+
+            # 새 재연결 코드 발급 (30분 유효)
+            _q(db, "DELETE FROM relink_codes WHERE space_id = ?", (space_id,))
+            code = generate_unique_invite_code(db)
+            expires_at = now_ms + (30 * 60 * 1000)
+            _q(db,
+                "INSERT INTO relink_codes (code, space_id, old_user_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+                (code.replace("-", ""), space_id, old_uid, now_ms, expires_at)
+            )
+            _db_commit(db)
+            return jsonify({"invite_code": code, "expires_in_minutes": 30, "is_relink": True}), 200
 
         # 아직 유효한 초대 코드가 있으면 재사용 (30분 유효)
         i_rows = _rows(_q(db,
@@ -1252,9 +1281,23 @@ def get_user_spaces(user_id):
 # ==========================================
 @app.route("/api/spaces/<space_id>/tasks", methods=["GET"])
 def get_tasks(space_id):
-    """할 일 목록 조회"""
+    """할 일 목록 조회 및 30일 경과 완료 항목 자동 정리"""
     db = get_db()
     try:
+        now_ms = int(time.time() * 1000)
+        thirty_days_ms = 30 * 24 * 60 * 60 * 1000
+        cutoff_ms = now_ms - thirty_days_ms
+
+        # 완료된 지 30일 지난 항목 영구 삭제 (completed_at 기준, 없으면 created_at 기준)
+        try:
+            _q(db,
+                "DELETE FROM tasks WHERE space_id = ? AND is_completed = 1 AND ((completed_at IS NOT NULL AND completed_at < ?) OR (completed_at IS NULL AND created_at < ?))",
+                (space_id, cutoff_ms, cutoff_ms)
+            )
+            _db_commit(db)
+        except Exception:
+            pass
+
         res = _q(db, 
             "SELECT * FROM tasks WHERE space_id = ? ORDER BY is_completed ASC, due_date ASC, created_at ASC",
             (space_id,)
@@ -1277,13 +1320,13 @@ def get_tasks(space_id):
 
 @app.route("/api/spaces/<space_id>/tasks", methods=["POST"])
 def add_task(space_id):
-    """할 일 추가"""
+    """할 일 추가 (클라이언트 전달 ID 우선 존중하여 중복 복제 방지)"""
     data = request.json or {}
     title = data.get("title", "").strip()
     if not title:
         return jsonify({"error": "할 일 제목을 입력해 주세요."}), 400
 
-    task_id = str(uuid.uuid4())
+    task_id = str(data.get("id") or uuid.uuid4())
     due_date = data.get("due_date", "")
     user_id = data.get("user_id", "")
     alarm_time = data.get("alarm_time", "")
@@ -1293,7 +1336,7 @@ def add_task(space_id):
     db = get_db()
     try:
         _q(db, 
-            "INSERT INTO tasks (id, space_id, title, due_date, is_completed, created_by, created_at, alarm_time, has_alarm) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO tasks (id, space_id, title, due_date, is_completed, created_by, created_at, alarm_time, has_alarm) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)",
             (task_id, space_id, title, due_date, user_id, now_ms, alarm_time, has_alarm)
         )
         _db_commit(db)
@@ -1526,8 +1569,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 20
-CURRENT_APP_VERSION_NAME = "1.6.4"
+CURRENT_APP_VERSION_CODE = 21
+CURRENT_APP_VERSION_NAME = "1.6.5"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1540,7 +1583,7 @@ def get_app_version():
         # 폴백도 같은 정식 자산을 가리킨다 — 과거에는 존재하지 않는 app-debug.apk(404) 였음.
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
-        "changelog": "🚀 v1.6.4 저장 위치 선택\n- 📁 음성 저장 전 원하는 방 선택 가능\n- 🔔 설치 차단 시 버전 표시로 원인 확인"
+        "changelog": "🚀 v1.6.5 안정성 강화\n- 🔄 배우자 기기 재연결 및 1초 방 복구 지원\n- 🎙️ 음성 녹음 중복 저장 버그 해결\n- 🗑️ 30일 경과 완료 할 일 자동 정리"
     }), 200
 
 

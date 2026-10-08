@@ -112,23 +112,16 @@
             android:turnScreenOn="true"
             android:launchMode="singleTop" />
 
-        <!-- 잠금화면 위 초경량 음성 등록 액티비티 (전원버튼 2번 누름 / 위젯 바로가기 연동) -->
+        <!-- 잠금화면 위 음성 등록 액티비티 (위젯/앱 내 마이크 버튼 전용) -->
         <activity
             android:name=".ui.QuickVoiceActivity"
             android:label="토닥 음성"
-            android:exported="true"
+            android:exported="false"
             android:showOnLockScreen="true"
             android:turnScreenOn="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:launchMode="singleTask"
-            android:excludeFromRecents="true">
-            <intent-filter>
-                <action android:name="android.intent.action.VOICE_COMMAND" />
-                <action android:name="android.intent.action.SEARCH_LONG_PRESS" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.VOICE" />
-            </intent-filter>
-        </activity>
+            android:excludeFromRecents="true" />
 
         <!-- 다운로드된 APK 설치를 위한 FileProvider -->
         <provider
