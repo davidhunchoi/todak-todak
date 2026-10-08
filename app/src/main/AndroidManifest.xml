@@ -123,10 +123,6 @@
             android:launchMode="singleTask"
             android:excludeFromRecents="true">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <intent-filter>
                 <action android:name="android.intent.action.VOICE_COMMAND" />
                 <action android:name="android.intent.action.SEARCH_LONG_PRESS" />
                 <category android:name="android.intent.category.DEFAULT" />

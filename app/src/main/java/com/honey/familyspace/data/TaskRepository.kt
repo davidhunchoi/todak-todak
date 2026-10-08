@@ -281,6 +281,7 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
             )
 
             val flow = getTaskFlow(spaceId)
+            val localBeforeSync = flow.value.toList()
             val syncedList = mutableListOf<Task>()
 
             for (i in 0 until tasksArray.length()) {
@@ -315,7 +316,12 @@ class TaskRepository(private val dataStore: DataStoreManager? = null) {
             }
 
             flow.value = syncedList
-            dataStore?.context?.let { saveTasksToCache(it, spaceId, syncedList) }
+            // 서버에 없는 로컬 전용(오프라인 음성 저장분)은 앞에 보존
+            val serverIds = syncedList.map { it.id }.toSet()
+            val localsOnly = localBeforeSync.filter { it.id !in serverIds }
+            val merged = localsOnly + syncedList
+            flow.value = merged
+            dataStore?.context?.let { saveTasksToCache(it, spaceId, merged) }
 
             // 위젯 및 상단바 알림 실시간 갱신
             dataStore?.context?.let { ctx ->

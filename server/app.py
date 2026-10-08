@@ -1526,8 +1526,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 18
-CURRENT_APP_VERSION_NAME = "1.6.2"
+CURRENT_APP_VERSION_CODE = 19
+CURRENT_APP_VERSION_NAME = "1.6.3"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1540,7 +1540,7 @@ def get_app_version():
         # 폴백도 같은 정식 자산을 가리킨다 — 과거에는 존재하지 않는 app-debug.apk(404) 였음.
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
-        "changelog": "🚀 v1.6.2 UI & 음성 마이크 정식 배포\n- 🎤 화면 우하단 원터치 마이크 버튼 및 음성 인식 연동\n- ⚙️ 간편 설정 및 음성 사용 가이드 추가\n- 📱 안드로이드 측면 버튼(전원 2회) 빠른 음성 등록 지원"
+        "changelog": "🚀 v1.6.3 음성 인식 개선\n- 🎤 구글 음성 다이얼로그 연동 및 30초 연속 청취\n- ✅ 완료 저장 버튼 오류 수정\n- 🔔 업데이트 알림 정상화"
     }), 200
 
 
