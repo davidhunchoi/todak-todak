@@ -30,9 +30,11 @@ import java.util.concurrent.TimeUnit
  * 빌드 환경이 바뀌면 서명이 달라져 "설치 안 됨"이 뜰 수 있다.
  * 정식 배포는 항상 같은 release 키로 서명한 APK를 같은 릴리스 자산명으로 올려야 한다.
  */
+import com.honey.familyspace.util.Constants
+
 object AppUpdateManager {
 
-    private const val VERSION_CHECK_URL = "https://todak-todak-ruby.vercel.app/api/version"
+    private const val VERSION_CHECK_URL = Constants.VERSION_CHECK_URL
 
     /** 설치 권한 화면을 다녀온 뒤 대기 중이던 APK URL (MainActivity.onResume에서 이어받기용) */
     @Volatile

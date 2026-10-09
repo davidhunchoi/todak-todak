@@ -18,7 +18,7 @@ app = Flask(
     template_folder=os.path.join(BASE_DIR, "templates"),
     static_folder=os.path.join(BASE_DIR, "static")
 )
-CORS(app)
+CORS(app, origins=["https://todak-todak-ruby.vercel.app"])
 
 
 @app.errorhandler(500)
@@ -27,9 +27,7 @@ def handle_internal_error(e):
     import traceback as _tb2
     _traceback = _tb2.format_exc()
     print(f"[500 ERROR] {e}\n{_traceback}", flush=True)
-    # TODO: 배포 후 디버깅용 - 실제 서비스에서는 error 필드만 반환
-    return jsonify({"error": "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
-                    "detail": str(e), "traceback": _traceback}), 500
+    return jsonify({"error": "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."}), 500
 
 # 환경 변수 설정 (Turso 연동)
 TURSO_DB_URL = os.getenv("TURSO_DATABASE_URL")
@@ -59,7 +57,7 @@ def get_db():
     else:
         # 로컬 테스트용 sqlite3
         import sqlite3
-        conn = sqlite3.connect("local_dev.db")
+        conn = sqlite3.connect(os.path.join(BASE_DIR, "local_dev.db"))
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -473,8 +471,6 @@ def _relink_token_ok():
     if not supplied:
         body = request.get_json(silent=True) or {}
         supplied = str(body.get("token") or "")
-    if not supplied:
-        supplied = request.args.get("token", "")
     return secrets.compare_digest(supplied, RELINK_TOKEN)
 
 
@@ -600,55 +596,7 @@ def health_check():
     }), 200
 
 
-@app.route("/debug/schema", methods=["GET"])
-def debug_schema():
-    """디버깅용: Turso DB 스키마 및 마이그레이션 확인 (임시 엔드포인트)"""
-    db = get_db()
-    result = {}
-    try:
-        try:
-            result["migration_results"] = migrate_schema_columns(db)
-        except Exception as e:
-            result["migration_error"] = str(e)
-
-        try:
-            probe = _q(db, "SELECT name FROM sqlite_master WHERE type='table'")
-            tables = [r[0] if not hasattr(r, 'keys') else r['name'] for r in _rows(probe)]
-            result["sqlite_master_tables"] = tables
-        except Exception as e:
-            result["sqlite_master_error"] = str(e)
-
-        table_columns = {}
-        for tbl in ["spaces", "space_members", "invites", "routines"]:
-            try:
-                res = _q(db, f"PRAGMA table_info({tbl})")
-                cols = [_row_get(r, "name", 1) for r in _rows(res)]
-                table_columns[tbl] = cols
-            except Exception as e:
-                table_columns[tbl] = f"error: {e}"
-        result["table_columns"] = table_columns
-
-        try:
-            import uuid as _uuid
-            _test_id = f"debug-{_uuid.uuid4()}"
-            _q(db,
-                "INSERT INTO spaces (id, title, theme_color, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
-                [_test_id, "디버그", "CORAL", "debug-user", 123]
-            )
-            result["insert_spaces"] = "success"
-        except Exception as e:
-            result["insert_spaces_error"] = str(e)
-
-        try:
-            res = _q(db, "SELECT * FROM spaces LIMIT 5")
-            rows = _rows(res)
-            result["select_spaces_count"] = len(rows)
-            result["select_spaces_ok"] = True
-        except Exception as e:
-            result["select_spaces_error"] = str(e)
-    finally:
-        _db_close(db)
-    return jsonify(result), 200
+# [REMOVED] /debug/schema 엔드포인트는 보안상 삭제되었습니다.
 
 
 # ==========================================
@@ -1076,6 +1024,8 @@ def delete_space_data(db, space_id):
     _q(db, "DELETE FROM invites WHERE space_id = ?", (space_id,))
     _q(db, "DELETE FROM space_delete_requests WHERE space_id = ?", (space_id,))
     _q(db, "DELETE FROM space_members WHERE space_id = ?", (space_id,))
+    _q(db, "DELETE FROM relink_codes WHERE space_id = ?", (space_id,))
+    _q(db, "DELETE FROM walkie_messages WHERE space_id = ?", (space_id,))
     _q(db, "DELETE FROM spaces WHERE id = ?", (space_id,))
     _db_commit(db)
 
@@ -1580,8 +1530,8 @@ def delete_routine(space_id, routine_id):
 # ==========================================
 # 4. 앱 버전 및 자체 자동 업데이트 API
 # ==========================================
-CURRENT_APP_VERSION_CODE = 23
-CURRENT_APP_VERSION_NAME = "1.6.7"
+CURRENT_APP_VERSION_CODE = 24
+CURRENT_APP_VERSION_NAME = "1.6.8"
 
 @app.route("/api/version", methods=["GET"])
 def get_app_version():
@@ -1594,7 +1544,7 @@ def get_app_version():
         # 폴백도 같은 정식 자산을 가리킨다 — 과거에는 존재하지 않는 app-debug.apk(404) 였음.
         "apk_url": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
         "apk_url_fallback": "https://github.com/davidhunchoi/todak-todak/releases/latest/download/app-release.apk",
-        "changelog": "🚀 v1.6.7 무전기 상시 노출 및 편의성 대폭 개선\n- 📻 1:1 무전기(PTT) 버튼 상단 고정\n- ➕ 혼자만의 방/어머니 방 추가 버튼 복원\n- 📱 배우자 스마트폰 재연결 코드 발급 지원\n- 🧭 My Navi 파워유저 격리 (일반 사용자 방 분리)\n- ⚙️ 큰 글꼴 설정 시 팝업 세로 스크롤 완벽 지원"
+        "changelog": "🚀 v1.6.8 상단 타이틀 2단 분리 & 진짜 무전기(실시간 자동 재생 / 화면 꺼짐 진동 수신) 완벽 탑재\n- 🏠 상단 방 이름 단독 가로 행 분리로 글자 찌그러짐 원천 차단\n- 📻 무전기 '즉시 받기' ON/OFF 스위치 (상대방 음성 즉시 스피커 출력)\n- 🌙 화면 꺼짐 무전 대기 (진동 수신) 포그라운드 서비스 탑재\n- 🔴 메인 화면 무전 도착 알림 뱃지 및 진동 안내"
     }), 200
 
 

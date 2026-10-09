@@ -1,9 +1,13 @@
 package com.honey.familyspace.ui
 
+import android.content.Context
 import android.content.Intent
 import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import com.honey.familyspace.data.WalkieRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -193,6 +197,14 @@ fun MainScreen(
         }
     }
 
+    // 무전기(PTT) 실시간 수신 및 설정 상태
+    val walkieRepo = remember { WalkieRepository(dataStore) }
+    val walkieAutoPlay by dataStore.walkieAutoPlayFlow.collectAsState(initial = true)
+    var hasUnreadWalkie by remember { mutableStateOf(false) }
+    var isWalkiePlaying by remember { mutableStateOf(false) }
+    var lastWalkiePollMs by remember { mutableStateOf(System.currentTimeMillis() - 30_000L) }
+    var walkiePlayer by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+
     // 주기적 잔소리 알림 설정 상태
     val reminderInterval by dataStore.reminderIntervalHoursFlow.collectAsState(initial = 2)
     val reminderNightMute by dataStore.reminderNightMuteFlow.collectAsState(initial = true)
@@ -278,6 +290,67 @@ fun MainScreen(
                 // 네트워크 일시 불안정 시 다음 주기에 재시도
             }
             delay(3000)
+        }
+    }
+
+    // 🌟 실시간 무전(Walkie) 수신 감지 루프 (메인 화면 활성 시)
+    LaunchedEffect(currentSpace?.id, walkieAutoPlay) {
+        if (currentSpace == null || isAllMode) return@LaunchedEffect
+        while (true) {
+            delay(3_000)
+            if (isWalkiePlaying) continue
+            try {
+                val latest = walkieRepo.pollLatest(currentSpace.id, afterMs = lastWalkiePollMs)
+                if (latest != null) {
+                    lastWalkiePollMs = latest.createdAt + 1
+                    if (walkieAutoPlay) {
+                        // 즉시 받기 ON: 스피커로 즉시 목소리 자동 재생!
+                        withContext(Dispatchers.Main) {
+                            try {
+                                val audioBytes = android.util.Base64.decode(latest.audioBase64, android.util.Base64.DEFAULT)
+                                val playFile = java.io.File.createTempFile("walkie_rx_", ".m4a", context.cacheDir)
+                                playFile.writeBytes(audioBytes)
+
+                                Toast.makeText(context, "📻 [${partnerNickname}]님의 실시간 무전 수신!", Toast.LENGTH_SHORT).show()
+                                val player = android.media.MediaPlayer()
+                                walkiePlayer = player
+                                player.setDataSource(playFile.absolutePath)
+                                player.prepare()
+                                player.start()
+                                isWalkiePlaying = true
+                                player.setOnCompletionListener {
+                                    isWalkiePlaying = false
+                                    playFile.delete()
+                                    player.release()
+                                    walkiePlayer = null
+                                    scope.launch { walkieRepo.markPlayed(currentSpace.id, latest.id) }
+                                }
+                            } catch (_: Exception) {
+                                isWalkiePlaying = false
+                            }
+                        }
+                    } else {
+                        // 즉시 받기 OFF: 진동 2회 + 무전기 버튼에 🔴 뱃지 표시
+                        hasUnreadWalkie = true
+                        try {
+                            val vibrator = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+                                vm?.defaultVibrator
+                            } else {
+                                @Suppress("DEPRECATION")
+                                context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                            }
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                vibrator?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 200, 100, 200), -1))
+                            } else {
+                                @Suppress("DEPRECATION")
+                                vibrator?.vibrate(longArrayOf(0, 200, 100, 200), -1)
+                            }
+                        } catch (_: Exception) {}
+                        Toast.makeText(context, "📻 [${partnerNickname}]님의 새 무전이 도착했어요! 🔴", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -378,118 +451,121 @@ fun MainScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // 1. 상시 고정 상단 헤더 (현재 방 제목 + 핵심 액션 버튼 상시 노출)
+            // 1. 방 제목 단독 상단 배치 (텍스트 찌그러짐 원천 방지)
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 좌측: 현재 방 이름
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f, fill = false)
-                ) {
-                    val displayTitle = if (isAllMode) "🌈 전체보기" else (currentSpace?.title ?: "우리 공간")
-                    Text(
-                        text = if (isAllMode) displayTitle else "🏠 $displayTitle",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(currentTheme.textColor),
-                        modifier = Modifier.combinedClickable(
-                            onClick = {
-                                if (!isAllMode) {
-                                    currentSpace?.let { space ->
-                                        renameTargetSpace = space
-                                        renameInputText = space.title
-                                        showRenameDialog = true
-                                    }
-                                }
-                            },
-                            onLongClick = {
-                                if (!isAllMode) {
-                                    currentSpace?.let { space ->
-                                        actionTargetSpace = space
-                                        showSpaceActionDialog = true
-                                    }
+                val displayTitle = if (isAllMode) "🌈 전체보기" else (currentSpace?.title ?: "우리 공간")
+                Text(
+                    text = if (isAllMode) displayTitle else "🏠 $displayTitle",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(currentTheme.textColor),
+                    modifier = Modifier.combinedClickable(
+                        onClick = {
+                            if (!isAllMode) {
+                                currentSpace?.let { space ->
+                                    renameTargetSpace = space
+                                    renameInputText = space.title
+                                    showRenameDialog = true
                                 }
                             }
-                        )
+                        },
+                        onLongClick = {
+                            if (!isAllMode) {
+                                currentSpace?.let { space ->
+                                    actionTargetSpace = space
+                                    showSpaceActionDialog = true
+                                }
+                            }
+                        }
                     )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // 2. 상시 고정 액션 버튼 그룹 (무전기, 추가, 초대, 설정 등)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 1) 📻 무전기(PTT) 버튼: 1:1 방일 때 선명한 배지 스타일 + 새 무전 뱃지!
+                if (!isAllMode && currentSpace != null) {
+                    Surface(
+                        onClick = {
+                            hasUnreadWalkie = false
+                            val intent = Intent(context, WalkieActivity::class.java).apply {
+                                putExtra(WalkieActivity.EXTRA_SPACE_ID, currentSpace.id)
+                                putExtra(WalkieActivity.EXTRA_SPACE_TITLE, currentSpace.title)
+                            }
+                            context.startActivity(intent)
+                        },
+                        color = if (hasUnreadWalkie) Color(0xFFFFEBEE) else Color(currentTheme.accentHex).copy(alpha = 0.18f),
+                        border = if (hasUnreadWalkie) BorderStroke(1.5.dp, Color(0xFFE53935)) else null,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                        ) {
+                            Text(text = "📻", fontSize = 15.sp)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = if (hasUnreadWalkie) "새 무전! 🔴" else "무전기",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (hasUnreadWalkie) Color(0xFFD32F2F) else Color(currentTheme.accentHex)
+                            )
+                        }
+                    }
                 }
 
-                // 우측: 상시 고정 액션 버튼 그룹
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 1) 📻 무전기(PTT) 버튼: 1:1 방일 때 선명한 배지 스타일로 상시 노출!
-                    if (!isAllMode && currentSpace != null) {
-                        Surface(
-                            onClick = {
-                                val intent = Intent(context, WalkieActivity::class.java).apply {
-                                    putExtra(WalkieActivity.EXTRA_SPACE_ID, currentSpace.id)
-                                    putExtra(WalkieActivity.EXTRA_SPACE_TITLE, currentSpace.title)
-                                }
-                                context.startActivity(intent)
-                            },
-                            color = Color(currentTheme.accentHex).copy(alpha = 0.18f),
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.padding(end = 2.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                            ) {
-                                Text(text = "📻", fontSize = 15.sp)
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text(
-                                    text = "무전기",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(currentTheme.accentHex)
-                                )
-                            }
-                        }
-                    }
+                // 2) ➕ 새 방 추가: 혼자만의 방, 어머니와의 방 언제든 1초 생성!
+                IconButton(onClick = { showJoinDialog = true; joinDialogCreating = true }) {
+                    Icon(Icons.Default.Add, contentDescription = "새 방 추가", tint = Color(currentTheme.accentHex))
+                }
 
-                    // 2) ➕ 새 방 추가: 혼자만의 방, 어머니와의 방 언제든 1초 생성!
-                    IconButton(onClick = { showJoinDialog = true; joinDialogCreating = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "새 방 추가", tint = Color(currentTheme.accentHex))
-                    }
+                // 3) 🔑 초대 코드 입력 버튼
+                IconButton(onClick = {
+                    joinDialogCreating = false
+                    joinError = null
+                    showJoinDialog = true
+                }) {
+                    Icon(Icons.Default.Key, contentDescription = "초대 코드 입력", tint = Color(currentTheme.accentHex))
+                }
 
-                    // 3) 🔑 초대 코드 입력 버튼
+                // 4) 👤+ 방 초대하기 버튼 (현재 1:1 방일 때)
+                if (currentSpace != null && !isAllMode) {
                     IconButton(onClick = {
-                        joinDialogCreating = false
-                        joinError = null
-                        showJoinDialog = true
-                    }) {
-                        Icon(Icons.Default.Key, contentDescription = "초대 코드 입력", tint = Color(currentTheme.accentHex))
-                    }
-
-                    // 4) 👤+ 방 초대하기 버튼 (현재 1:1 방일 때)
-                    if (currentSpace != null && !isAllMode) {
-                        IconButton(onClick = {
-                            if (currentSpace.memberCount >= 2) {
-                                showMemberLimitDialog = true
-                            } else {
-                                scope.launch {
-                                    spaceRepo.getOrRefreshInviteCode(currentSpace.id).onSuccess { code ->
-                                        generatedCode = code
-                                        showInviteDialog = true
-                                    }
+                        if (currentSpace.memberCount >= 2) {
+                            showMemberLimitDialog = true
+                        } else {
+                            scope.launch {
+                                spaceRepo.getOrRefreshInviteCode(currentSpace.id).onSuccess { code ->
+                                    generatedCode = code
+                                    showInviteDialog = true
                                 }
                             }
-                        }) {
-                            Icon(Icons.Default.PersonAdd, contentDescription = "방 초대하기", tint = Color(currentTheme.accentHex))
                         }
+                    }) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = "방 초대하기", tint = Color(currentTheme.accentHex))
                     }
+                }
 
-                    // 5) ⚙️ 알림 및 공간 설정 버튼
-                    IconButton(onClick = { showReminderSettingsDialog = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "알림 설정", tint = Color(currentTheme.accentHex))
-                    }
+                // 5) ⚙️ 알림 및 공간 설정 버튼
+                IconButton(onClick = { showReminderSettingsDialog = true }) {
+                    Icon(Icons.Default.Settings, contentDescription = "알림 설정", tint = Color(currentTheme.accentHex))
+                }
 
-                    // 6) 🔄 원터치 새로고침 버튼
-                    IconButton(onClick = triggerRefresh) {
-                        Icon(Icons.Default.Refresh, contentDescription = "새로고침", tint = Color(currentTheme.accentHex))
-                    }
+                // 6) 🔄 원터치 새로고침 버튼
+                IconButton(onClick = triggerRefresh) {
+                    Icon(Icons.Default.Refresh, contentDescription = "새로고침", tint = Color(currentTheme.accentHex))
                 }
             }
 
@@ -1310,7 +1386,7 @@ fun MainScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "https://todak-todak-ruby.vercel.app/download/app-latest.apk",
+                        com.honey.familyspace.util.Constants.APK_DOWNLOAD_URL,
                         fontSize = 13.sp,
                         color = Color(currentTheme.accentHex)
                     )
@@ -1338,7 +1414,7 @@ fun MainScreen(
                         "📝 4자리 초대 코드: ${generatedCode}\n" +
                         "(30분 안에 입력해 주세요)\n\n" +
                         "만약 아직 앱이 없다면 아래 링크를 눌러 먼저 설치해 주세요 ↓\n" +
-                        "https://todak-todak-ruby.vercel.app/download/app-latest.apk\n\n" +
+                        "${com.honey.familyspace.util.Constants.APK_DOWNLOAD_URL}\n\n" +
                         "설치 후 토닥토닥 앱 상단의 [초대 코드 입력(열쇠 아이콘)]에\n'${generatedCode}'를 입력하면 바로 연결돼요!"
                     val sendIntent = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
@@ -1777,524 +1853,3 @@ fun MainScreen(
     }
 }
 
-/**
- * 개별 할 일 카드 컴포넌트 (짧게 누르면 완료 토글, 길게 누르면 수정/삭제)
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun TaskCardItem(
-    task: Task,
-    todayDate: String,
-    theme: ThemeColor,
-    spaceBadge: String? = null,
-    onToggle: () -> Unit,
-    onLongClick: () -> Unit
-) {
-    val badge = task.getDueBadge(todayDate)
-    val isOverdue = !task.isCompleted && badge == DueBadge.OVERDUE
-
-    // 기한 초과 시 소프트 로즈 틴트 배경 및 은은한 로즈 핑크 테두리 적용 (방식 A)
-    val cardBgColor = when {
-        task.isCompleted -> Color(0xFFF9F9F9)
-        isOverdue -> Color(0xFFFFF0F2)
-        else -> Color.White
-    }
-    val cardBorder = if (isOverdue) {
-        BorderStroke(1.dp, Color(0xFFFFA4B2).copy(alpha = 0.6f))
-    } else {
-        null
-    }
-
-    Card(
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = cardBgColor
-        ),
-        border = cardBorder,
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onToggle,
-                onLongClick = onLongClick
-            )
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 동그라미 체크박스
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .background(
-                        color = if (task.isCompleted) Color(theme.accentHex) else Color(0xFFEEEEEE),
-                        shape = CircleShape
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                if (task.isCompleted) {
-                    Icon(Icons.Default.Check, contentDescription = "완료", tint = Color.White, modifier = Modifier.size(20.dp))
-                }
-            }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                if (!spaceBadge.isNullOrBlank()) {
-                    Surface(
-                        color = Color(theme.accentHex).copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    ) {
-                        Text(
-                            text = "🏷️ $spaceBadge",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(theme.accentHex),
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
-                Text(
-                    text = task.title,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (task.isCompleted) Color(0xFF9E9E9E) else Color(theme.textColor),
-                    textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (badge.label.isNotBlank()) {
-                        Text(
-                            text = if (task.dueDate.isNotBlank() && !task.isCompleted) {
-                                "${badge.label} · ${DateTimeUtils.formatKoreanDate(task.dueDate)}"
-                            } else {
-                                badge.label
-                            },
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(badge.badgeColorHex)
-                        )
-                    }
-
-                    // 소리 알람이 켜져 있는 경우 알람 시각 뱃지 표시
-                    if (task.hasAlarm && !task.alarmTime.isNullOrBlank() && !task.isCompleted) {
-                        if (badge.label.isNotBlank()) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                        }
-                        val timeParts = task.alarmTime.split(":")
-                        val h = timeParts.getOrNull(0)?.toIntOrNull() ?: 10
-                        val m = timeParts.getOrNull(1)?.toIntOrNull() ?: 0
-                        val amPm = if (h < 12) "오전" else "오후"
-                        val displayH = if (h % 12 == 0) 12 else h % 12
-                        val alarmStr = "$amPm $displayH:${String.format(java.util.Locale.KOREA, "%02d", m)}"
-                        Surface(
-                            color = Color(theme.accentHex).copy(alpha = 0.12f),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = "⏰ $alarmStr",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(theme.accentHex),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * 매일 반복 루틴 카드 컴포넌트
- * 상대 검토 등 복잡한 요소를 배제하고 직관적인 완료 토글 버튼 및 롱클릭 삭제 지원
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun RoutineCardItem(
-    routine: DailyRoutine,
-    todayDate: String,
-    theme: ThemeColor,
-    spaceBadge: String? = null,
-    onCheck: () -> Unit,
-    onLongClick: () -> Unit
-) {
-    val isDone = routine.isCompletedToday(todayDate)
-
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isDone) Color(0xFFF1F8E9) else Color.White
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onCheck,
-                onLongClick = onLongClick
-            )
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "🔁 매일 반복",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(theme.accentHex)
-                    )
-                    if (!spaceBadge.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(
-                            color = Color(theme.accentHex).copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = "🏷️ $spaceBadge",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(theme.accentHex),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-
-                if (isDone) {
-                    Text(
-                        text = "오늘 완료! ✅ (${routine.lastCompletedTime})",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF2E7D32)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = routine.title,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isDone) Color(0xFF757575) else Color(theme.textColor),
-                textDecoration = if (isDone) TextDecoration.LineThrough else TextDecoration.None
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 일반 할 일처럼 심플하고 직관적인 완료 토글 버튼
-            Button(
-                onClick = onCheck,
-                modifier = Modifier.fillMaxWidth().height(44.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isDone) Color(0xFFC8E6C9) else Color(theme.accentHex)
-                )
-            ) {
-                Text(
-                    text = if (isDone) "✅ 완료했어요" else "먹었어요 / 완료하기",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isDone) Color(0xFF1B5E20) else Color.White
-                )
-            }
-        }
-    }
-}
-
-/**
- * 스페이스가 전혀 없을 때 보여주는 시작 가이드
- */
-@Composable
-private fun EmptySpaceGuide(
-    onCreateSpace: (title: String, theme: ThemeColor) -> Unit,
-    onJoinClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(top = 40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("환영합니다! 🏡", fontSize = 26.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(10.dp))
-        Text("배우자나 가족과 함께 사용할\n방을 만들거나 초대 코드를 입력해 주세요.", fontSize = 15.sp, color = Color.Gray)
-
-        Spacer(modifier = Modifier.height(30.dp))
-
-        Button(
-            onClick = { onCreateSpace("우리 부부", ThemeColor.CORAL) },
-            modifier = Modifier.fillMaxWidth().height(54.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(ThemeColor.CORAL.accentHex))
-        ) {
-            Text("새 방 만들기 (예: 우리 부부)", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        Button(
-            onClick = onJoinClick,
-            modifier = Modifier.fillMaxWidth().height(54.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF555555))
-        ) {
-            Text("초대 코드 입력하고 연결하기", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-/**
- * 5종 감성 파스텔 테마 컬러 팔레트 선택 컴포넌트
- */
-@Composable
-private fun ThemeColorPaletteSelector(
-    selectedTheme: ThemeColor,
-    onSelectTheme: (ThemeColor) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ThemeColor.entries.forEach { theme ->
-            val isSelected = theme == selectedTheme
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        color = if (isSelected) Color(theme.accentHex).copy(alpha = 0.15f) else Color(0xFFF8F8F8),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    .clickable { onSelectTheme(theme) }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .background(Color(theme.accentHex), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isSelected) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = "선택됨",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = theme.displayName,
-                    fontSize = 14.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                    color = if (isSelected) Color(theme.accentHex) else Color(0xFF333333)
-                )
-            }
-        }
-    }
-}
-
-/**
- * 초대 코드 입력 및 새 방 개설 다이얼로그 (테마 컬러 선택 지원)
- */
-@Composable
-private fun JoinSpaceDialog(
-    theme: ThemeColor,
-    initialCreating: Boolean = false,
-    errorMessage: String? = null,
-    createError: String? = null,
-    onDismiss: () -> Unit,
-    onJoinCode: (code: String) -> Unit,
-    onCreateNew: (title: String, theme: ThemeColor) -> Unit
-) {
-    var inputCode by remember { mutableStateOf("") }
-    var newTitle by remember { mutableStateOf("") }
-    var selectedTheme by remember { mutableStateOf(ThemeColor.CORAL) }
-    var isCreating by remember { mutableStateOf(initialCreating) }
-
-    // 연결하기 버튼은 유효한 4자리 코드가 모두 입력되었을 때만 활성화
-    val isCodeValid = InviteCodeGenerator.isValidCode(inputCode)
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (isCreating) "새 방 만들기" else "초대 코드로 연결", fontWeight = FontWeight.Bold) },
-        text = {
-            Column {
-                if (isCreating) {
-                    OutlinedTextField(
-                        value = newTitle,
-                        onValueChange = { newTitle = it },
-                        label = { Text("방 이름 (예: 엄마와 나, 모임)") },
-                        isError = createError != null,
-                        supportingText = {
-                            if (createError != null) {
-                                Text(createError, fontSize = 12.sp, color = Color(0xFFB3261E))
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("방 테마 색상 선택 🎨", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    ThemeColorPaletteSelector(
-                        selectedTheme = selectedTheme,
-                        onSelectTheme = { selectedTheme = it }
-                    )
-                } else {
-                    OutlinedTextField(
-                        value = inputCode,
-                        onValueChange = { raw ->
-                            // 숫자만 허용, 최대 4자리
-                            inputCode = raw.filter { it.isDigit() }.take(4)
-                        },
-                        label = { Text("4자리 초대 코드") },
-                        placeholder = { Text("예: 1234") },
-                        isError = (inputCode.isNotBlank() && !isCodeValid) || errorMessage != null,
-                        supportingText = {
-                            when {
-                                errorMessage != null -> Text(errorMessage, fontSize = 12.sp, color = Color(0xFFB3261E))
-                                inputCode.isNotBlank() && !isCodeValid -> Text(
-                                    "4자리 숫자를 모두 입력해 주세요",
-                                    fontSize = 12.sp
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "📱 폰 교체/재설치 시 전달받은 배우자 재연결 코드도 여기에 입력하시면 기존 방으로 즉시 연결됩니다 🌸",
-                        fontSize = 12.sp,
-                        color = Color.Gray
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (isCreating && newTitle.isNotBlank()) {
-                        onCreateNew(newTitle, selectedTheme)
-                    } else if (!isCreating && isCodeValid) {
-                        onJoinCode(inputCode)
-                    }
-                },
-                enabled = if (isCreating) newTitle.isNotBlank() else isCodeValid,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isCreating) Color(selectedTheme.accentHex) else Color(theme.accentHex),
-                    disabledContainerColor = Color(0xFFCCCCCC)
-                )
-            ) {
-                Text(if (isCreating) "방 만들기" else "연결하기")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = { isCreating = !isCreating }) {
-                Text(if (isCreating) "초대 코드로 참여하기" else "직접 새 방 만들기")
-            }
-        }
-    )
-}
-
-/**
- * 🎙️ 한국어 음성 명령 사용 가이드 다이얼로그 (Information)
- */
-@Composable
-private fun VoiceGuideDialog(
-    theme: ThemeColor,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(24.dp),
-        containerColor = Color.White,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🎙️ 음성 명령 사용법 안내", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(theme.textColor))
-            }
-        },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "전원 버튼을 2번 연속 누르면 화면이 켜지며 바로 음성 녹음이 시작됩니다 ⚡",
-                    fontSize = 13.sp,
-                    color = Color.DarkGray,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // 카드 1: 가족/부부 기본 할일
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("🌸 기본 가족/부부 할 일", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("• \"오늘날짜로 우유 사기 저장해줘\"", fontSize = 13.sp, color = Color(0xFF333333))
-                        Text("• \"내일 세탁소 정장 찾기 등록해줘\"", fontSize = 13.sp, color = Color(0xFF333333))
-                        Text("• \"이번주 금요일 부모님 병원 예약\"", fontSize = 13.sp, color = Color(0xFF333333))
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 카드 2: 마이 내비게이터 Gantt Task (파워유저)
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEDE7F6)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("🧭 마이 내비게이터 Gantt (파워유저)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF512DA8))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("• \"내비에 오늘날짜로 배관 자재 발주 체크\"", fontSize = 13.sp, color = Color(0xFF333333))
-                        Text("• \"간트에 내일 P&ID 라인 넘버링 검토\"", fontSize = 13.sp, color = Color(0xFF333333))
-                        Text("👉 지정하신 [Gantt 기본 수신함]으로 자동 적재!", fontSize = 11.sp, color = Color(0xFF673AB7), fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 카드 3: 인생 라이프 그래프 (파워유저)
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("📈 인생 라이프 그래프 (파워유저)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("• \"인생기록: 오늘 대형 프로젝트 계약 체결!\"", fontSize = 13.sp, color = Color(0xFF333333))
-                        Text("• \"인생그래프: 배관 기술사 1차 합격!\"", fontSize = 13.sp, color = Color(0xFF333333))
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "💡 팁: 문장 끝의 '~저장해줘', '~적어줘'는 앱이 알아서 깔끔하게 제거하고 등록해 드려요.",
-                    fontSize = 11.sp,
-                    color = Color.Gray
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(theme.accentHex)),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("확인", color = Color.White, fontWeight = FontWeight.Bold)
-            }
-        }
-    )
-}

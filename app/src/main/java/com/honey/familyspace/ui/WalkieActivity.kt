@@ -36,11 +36,15 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
+import com.honey.familyspace.service.WalkieStandbyService
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -126,6 +130,10 @@ fun WalkieScreen(
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val dataStore = remember { DataStoreManager(context) }
+    val walkieAutoPlay by dataStore.walkieAutoPlayFlow.collectAsState(initial = true)
+    val walkieStandby by dataStore.walkieStandbyFlow.collectAsState(initial = true)
 
     // 상태
     var isRecording by remember { mutableStateOf(false) }
@@ -312,6 +320,82 @@ fun WalkieScreen(
                             color = Color(0xFFB0BEC5),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 설정 카드 (즉시 받기 & 화면 꺼짐 대기)
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0x14FFFFFF)),
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    // 1. 즉시 받기 스위치
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "📻 즉시 받기 (진짜 무전기 모드)",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (walkieAutoPlay) "상대방이 말하면 스피커로 곧바로 들림" else "음성 녹음으로 전달받고 확인",
+                                color = if (walkieAutoPlay) Color(0xFF81C784) else Color(0xFF90A4AE),
+                                fontSize = 11.sp
+                            )
+                        }
+                        Switch(
+                            checked = walkieAutoPlay,
+                            onCheckedChange = { checked ->
+                                scope.launch { dataStore.setWalkieAutoPlay(checked) }
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 2. 화면 꺼짐 무전 대기 스위치
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "🌙 화면 꺼짐 무전 대기 (진동 수신)",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (walkieStandby) "화면 꺼져도 무전 오면 진동 알림 울림" else "배터리 절전 (앱 열었을 때만 수신)",
+                                color = if (walkieStandby) Color(0xFF81C784) else Color(0xFF90A4AE),
+                                fontSize = 11.sp
+                            )
+                        }
+                        Switch(
+                            checked = walkieStandby,
+                            onCheckedChange = { checked ->
+                                scope.launch {
+                                    dataStore.setWalkieStandby(checked)
+                                    if (checked) {
+                                        WalkieStandbyService.start(context)
+                                    } else {
+                                        WalkieStandbyService.stop(context)
+                                    }
+                                }
+                            }
                         )
                     }
                 }

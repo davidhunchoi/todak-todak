@@ -18,6 +18,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import com.honey.familyspace.util.Constants
 import java.util.concurrent.TimeUnit
 
 /**
@@ -26,7 +27,7 @@ import java.util.concurrent.TimeUnit
 class TaskRepository(private val dataStore: DataStoreManager? = null) {
 
     companion object {
-        private const val BASE_URL = "https://todak-todak-ruby.vercel.app"
+        private const val BASE_URL = Constants.BASE_URL
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
         private val client = OkHttpClient.Builder()

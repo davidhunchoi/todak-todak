@@ -25,6 +25,9 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- 알람 시각 꺼진 화면 깨우기 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 무전기 화면 꺼짐 상시 수신 대기 서비스 (Android 14+ dataSync) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Android 11+ 구글 음성 인식 서비스 및 다이얼로그 패키지 가시성 쿼리 -->
     <queries>
@@ -38,7 +41,7 @@
 
     <application
         android:name=".FamilySpaceApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -129,6 +132,12 @@
             android:label="토닥 무전기"
             android:exported="false"
             android:theme="@style/Theme.FamilySpaceTodo" />
+
+        <!-- 무전기 화면 꺼짐 진동 수신 대기 서비스 (Android 14+ dataSync) -->
+        <service
+            android:name=".service.WalkieStandbyService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
 
         <!-- 다운로드된 APK 설치를 위한 FileProvider -->

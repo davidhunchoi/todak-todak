@@ -17,6 +17,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import com.honey.familyspace.util.Constants
 import java.util.concurrent.TimeUnit
 
 /**
@@ -28,7 +29,7 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
         const val MY_NAVI_SPACE_ID = "space_my_navi_poweruser"
         const val MY_NAVI_TITLE = "🧭 My Navi"
 
-        private const val BASE_URL = "https://todak-todak-ruby.vercel.app"
+        private const val BASE_URL = Constants.BASE_URL
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
         private val client = OkHttpClient.Builder()
@@ -500,6 +501,11 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
                     put("id", s.id)
                     put("title", s.title)
                     put("theme_color", s.themeColor)
+                    
+                    val uidsArr = JSONArray()
+                    s.memberUids.forEach { uidsArr.put(it) }
+                    put("member_uids", uidsArr)
+                    
                     put("member_count", s.memberCount)
                     put("created_by", s.createdBy)
                     put("created_at", s.createdAt)
@@ -519,7 +525,18 @@ class SpaceRepository(private val dataStore: DataStoreManager? = null) {
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val mCount = obj.optInt("member_count", 1)
-                val memberUids = if (mCount >= 2) listOf("uid1", "uid2") else listOf("uid1")
+                
+                val memberUids = mutableListOf<String>()
+                val uidsArr = obj.optJSONArray("member_uids")
+                if (uidsArr != null) {
+                    for (j in 0 until uidsArr.length()) {
+                        memberUids.add(uidsArr.getString(j))
+                    }
+                } else {
+                    // Fallback for older cache
+                    if (mCount >= 2) memberUids.addAll(listOf("uid1", "uid2")) else memberUids.add("uid1")
+                }
+                
                 list.add(
                     Space(
                         id = obj.getString("id"),

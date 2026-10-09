@@ -29,6 +29,9 @@ class DataStoreManager(val context: Context) {
         private val KEY_NAVIGATOR_SERVER_URL = stringPreferencesKey("navigator_server_url")
         private val KEY_NAVIGATOR_API_KEY = stringPreferencesKey("navigator_api_key")
         private val KEY_NAVIGATOR_DEFAULT_TASK_GROUP = stringPreferencesKey("navigator_default_task_group")
+        // 무전기(PTT) 설정
+        private val KEY_WALKIE_AUTO_PLAY = androidx.datastore.preferences.core.booleanPreferencesKey("walkie_auto_play")
+        private val KEY_WALKIE_STANDBY = androidx.datastore.preferences.core.booleanPreferencesKey("walkie_standby")
     }
 
     /**
@@ -110,13 +113,39 @@ class DataStoreManager(val context: Context) {
     }
 
     /**
+     * 무전기 즉시 받기 (진짜 무전기 모드) - 기본값: true
+     */
+    val walkieAutoPlayFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_WALKIE_AUTO_PLAY] ?: true
+    }
+
+    suspend fun setWalkieAutoPlay(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_WALKIE_AUTO_PLAY] = enabled
+        }
+    }
+
+    /**
+     * 화면 꺼짐 무전 대기 (진동 수신) - 기본값: true
+     */
+    val walkieStandbyFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_WALKIE_STANDBY] ?: true
+    }
+
+    suspend fun setWalkieStandby(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_WALKIE_STANDBY] = enabled
+        }
+    }
+
+    /**
      * 기기별 영구 고유 사용자 ID 반환 (없으면 생성 후 저장)
      * 매일 루틴의 "나" vs "상대" 완료 구분 및 서버 동기화의 기반
      */
     suspend fun getOrCreateUserId(): String {
         var userId = ""
         context.dataStore.edit { prefs ->
-            userId = prefs[KEY_USER_ID] ?: java.util.UUID.randomUUID().toString().substring(0, 8)
+            userId = prefs[KEY_USER_ID] ?: java.util.UUID.randomUUID().toString()
             prefs[KEY_USER_ID] = userId
         }
         return userId
